@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime, timezone
 import uuid
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Text, Enum
+from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Text, Index
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import declarative_base, relationship
 
@@ -20,6 +20,7 @@ class Webhook(Base):
     destination_url = Column(String, nullable=False)
     payload = Column(JSONB, nullable=False)
     headers = Column(JSONB, nullable=False)
+    idempotency_key = Column(String, nullable=True)
     status = Column(String, nullable=False, default=WebhookStatus.PENDING.value)
     retry_count = Column(Integer, nullable=False, default=0)
     max_retries = Column(Integer, nullable=False, default=5)
@@ -37,6 +38,7 @@ class Webhook(Base):
             "destination_url": self.destination_url,
             "payload": self.payload,
             "headers": self.headers,
+            "idempotency_key": self.idempotency_key,
             "status": self.status,
             "retry_count": self.retry_count,
             "max_retries": self.max_retries,
@@ -45,6 +47,12 @@ class Webhook(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+    __table_args__ = (
+        Index("ix_webhooks_status_next_attempt_at", "status", "next_attempt_at"),
+        Index("ix_webhooks_created_at", "created_at"),
+        Index("ix_webhooks_destination_idempotency_key", "destination_url", "idempotency_key", unique=True),
+    )
 
 class DeliveryAttempt(Base):
     __tablename__ = "delivery_attempts"
@@ -71,3 +79,7 @@ class DeliveryAttempt(Base):
             "error_message": self.error_message,
             "attempted_at": self.attempted_at.isoformat() if self.attempted_at else None,
         }
+
+    __table_args__ = (
+        Index("ix_delivery_attempts_webhook_id_attempt_number", "webhook_id", "attempt_number"),
+    )

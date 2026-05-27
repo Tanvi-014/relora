@@ -1,113 +1,163 @@
-# Hermes: Guaranteed Webhook Delivery Middleware
+# Hermes
 
-Hermes is an open-source, lightweight, self-hostable middleware proxy designed to guarantee webhook delivery. It sits between event publishers (e.g., Stripe, Shopify, Twilio, GitHub) and your application, catching webhook requests instantly, persisting them durably in a PostgreSQL database, and delivering them reliably with concurrent workers and exponential backoff.
+Guaranteed webhook delivery middleware for teams that need reliable event intake while their downstream apps deploy, fail, or slow down.
 
-If your downstream server is down for maintenance, deploys, or heavy load, Hermes buffers the webhooks and retries until delivery is confirmed. It features a developer console dashboard to monitor, inspect, and manually replay failed/dead-lettered webhooks.
+Hermes sits between webhook publishers such as Stripe, Shopify, Twilio, GitHub, or internal services and your application. It accepts webhook requests immediately, stores them durably in PostgreSQL, and delivers them asynchronously with concurrent workers, exponential backoff, delivery logs, and manual replay from a developer console.
 
----
+## Why It Exists
 
-## Architecture Highlight: Postgres Queueing (`SKIP LOCKED`)
+Webhook providers usually expect your endpoint to be online and fast. If your app is restarting, overloaded, or temporarily broken, events can be lost or require manual recovery. Hermes gives you a lightweight self-hosted buffer without requiring Redis, RabbitMQ, or Kafka for the MVP path.
 
-Instead of requiring heavy message brokers like RabbitMQ or Redis, Hermes uses a single Postgres database instance. Concurrent workers claim pending jobs atomically using `SELECT ... FOR UPDATE SKIP LOCKED`, preventing multiple workers from claiming or delivering the same webhook, with zero performance locking bottlenecks.
+## Architecture
 
+Hermes uses PostgreSQL as both state store and queue. Workers claim jobs atomically with `SELECT ... FOR UPDATE SKIP LOCKED`, allowing multiple workers to process pending webhooks without double-delivery from the queue.
+
+```mermaid
+flowchart TD
+    A["Webhook Source<br/>Stripe, GitHub, Shopify"] -->|POST| B["Hermes Ingestion API<br/>FastAPI"]
+    B -->|Persist payload and headers| C["PostgreSQL<br/>Queue and audit log"]
+    C -->|SKIP LOCKED claim| D["Worker Pool"]
+    D -->|POST with tracing headers| E["Downstream App"]
+    E -->|2xx| F["Completed"]
+    E -->|timeout or non-2xx| G["Retry with exponential backoff"]
+    G --> C
+    G -->|max retries exceeded| H["Dead Letter Queue"]
+    H -->|manual replay| C
 ```
-                  ┌──────────────────────┐
-                  │ Webhook Event Source │ (e.g. Stripe)
-                  └──────────┬───────────┘
-                             │ POST
-                             ▼
-                    ┌─────────────────┐
-                    │  Ingestion API  │  (FastAPI - Instant 200 OK)
-                    └────────┬────────┘
-                             │ DB Write
-                             ▼
-                    ┌─────────────────┐
-                    │   PostgreSQL    │  (State Store & Queue)
-                    └────────┬────────┘
-                             │
-     ┌───────────────────────┼───────────────────────┐
-     │ SKIP LOCKED           │ SKIP LOCKED           │ SKIP LOCKED
-     ▼                       ▼                       ▼
-┌──────────┐            ┌──────────┐            ┌──────────┐
-│ Worker 1 │            │ Worker 2 │            │ Worker N │ (Concurrent Pool)
-└────┬─────┘            └────┬─────┘            └────┬─────┘
-     │ POST                  │ POST                  │ POST
-     ▼                       ▼                       ▼
-┌──────────┐            ┌──────────┐            ┌──────────┐
-│ Target A │            │ Target B │            │ Target C │ (Your Downstream Apps)
-└──────────┘            └──────────┘            └──────────┘
-```
-
----
 
 ## Features
 
-- **Ultra-Fast Ingestion:** Durably stores payload and headers in PostgreSQL under 15ms and returns a `200 OK` to the sender.
-- **Concurrent Worker Pool:** High-throughput async delivery agents with safe database-level job-claiming.
-- **Exponential Backoff Retries:** Automatically schedules retries with growing intervals on downstream failures (e.g., 30s, 60s, 120s...).
-- **Header Preserving:** Forwards exact security signatures (e.g. `Stripe-Signature`), adding tracing headers `X-Hermes-Delivery-Id` and `X-Hermes-Attempt`.
-- **Dead Letter Queue (DLQ):** Webhooks exceeding maximum retries are kept durably so you can inspect payloads and trace logs.
-- **Developer Console:** Premium dark-mode dashboard (inspired by Linear and Railway) built with vanilla JS and custom CSS for monitoring, inspect, and manual replay commands.
-
----
+- Durable ingestion endpoint that returns quickly after writing to PostgreSQL.
+- Concurrent worker pool using Postgres row locking and `SKIP LOCKED`.
+- Exponential retry backoff with configurable retry limits.
+- Dead letter queue for permanently failed webhooks.
+- Manual replay endpoint and dashboard action.
+- Header preservation with Hermes tracing headers.
+- Idempotency support using `Idempotency-Key` or `X-Hermes-Idempotency-Key`.
+- Structured JSON logs for ingestion, worker claiming, delivery, retry, DLQ, and replay events.
+- Developer console for stats, filtering, inspection, payloads, headers, attempts, and replay.
+- Optional `X-Hermes-API-Key` protection for API endpoints.
+- Destination URL validation with optional host allowlisting and private-network blocking.
+- Prometheus-style `/metrics` endpoint for operational visibility.
 
 ## Quickstart
 
-Ensure you have [Docker and Docker Compose](https://docs.docker.com/compose/install/) installed.
+Prerequisites:
 
-### 1. Start Hermes
+- Docker
+- Docker Compose
 
-Clone the project and run:
+Start the stack:
 
 ```bash
 docker-compose up --build
 ```
 
-This starts:
-- **PostgreSQL Database** on port `5432`
-- **FastAPI API Server & Web Workers** on port `8000`
-- **Dashboard Web Console** mounted and served at `http://localhost:8000/`
+Services:
 
----
+- PostgreSQL: `localhost:5432`
+- Hermes API and dashboard: `http://localhost:8000`
+- Fake downstream demo app: `http://localhost:9000`
 
-## Ingesting Your First Webhook
-
-To route a webhook through Hermes, send it to the Hermes host with the downstream destination passed in the `url` query parameter.
-
-For example, if your application expects a webhook at `http://host.docker.internal:3000/webhooks`, configure your sender to hit:
-
-```http
-POST http://localhost:8000/api/v1/ingest?url=http://host.docker.internal:3000/webhooks
-```
-
-### Example Curl:
+Send a test webhook:
 
 ```bash
 curl -X POST "http://localhost:8000/api/v1/ingest?url=https://httpbin.org/status/200" \
-     -H "Content-Type: application/json" \
-     -H "X-Custom-Auth-Signature: stripe_xyz123" \
-     -d '{"event": "payment.succeeded", "amount": 2999}'
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: payment-succeeded-2999" \
+  -H "X-Custom-Auth-Signature: stripe_xyz123" \
+  -d '{"event":"payment.succeeded","amount":2999}'
 ```
 
-Hermes instantly saves the payload and custom signature header, queueing it for delivery, and returns:
+The API responds immediately with a webhook id while the worker delivers the payload in the background.
 
-```json
-{
-  "success": true,
-  "webhook_id": "8a7fb783-a2be-4972-bc32-15e76a6cf34e",
-  "message": "Webhook ingested and queued for delivery"
-}
+Run the full demo:
+
+```bash
+docker-compose exec hermes python scripts/demo.py
 ```
 
----
+The demo checks health, queues a successful delivery to the fake downstream service, proves duplicate ingestion reuses the original webhook id, queues a failing delivery, shows retry state, requests replay, and prints current stats.
+
+## Configuration
+
+Copy `.env.example` to `.env` for local overrides.
+
+Important settings:
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | Async SQLAlchemy database URL used by the app. |
+| `WORKER_CONCURRENCY` | Number of concurrent delivery workers. |
+| `DEFAULT_MAX_RETRIES` | Number of delivery attempts before DLQ. |
+| `BACKOFF_BASE_SECONDS` | Base interval for exponential backoff. |
+| `HERMES_API_KEY` | Optional API key. When set, clients must send `X-Hermes-API-Key`. |
+| `ALLOW_PRIVATE_DESTINATIONS` | Allows local/private destinations for demos. Set `false` in production. |
+| `DESTINATION_HOST_ALLOWLIST` | Optional comma-separated list of allowed destination hosts. |
+| `AUTO_CREATE_TABLES` | Creates tables at startup for MVP/demo use. Production should use migrations. |
 
 ## API Reference
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `/api/v1/ingest?url=<URL>` | `POST` | Generic ingestion. Captures headers + JSON body. |
-| `/api/v1/webhooks` | `GET` | List all webhooks (supports pagination and `?status=` filtering). |
-| `/api/v1/webhooks/{id}` | `GET` | Detailed webhook inspection with nested execution attempts. |
-| `/api/v1/webhooks/{id}/replay` | `POST` | Manually reschedule/replay a failed or dead webhook. |
-| `/api/v1/stats` | `GET` | Aggregated dashboard telemetry card statistics. |
-| `/health` | `GET` | API health indicator. |
+| `/api/v1/ingest?url=<URL>` | `POST` | Captures payload and headers, stores a webhook, and queues delivery. |
+| `/api/v1/webhooks` | `GET` | Lists webhooks with pagination and optional `status` filtering. |
+| `/api/v1/webhooks/{id}` | `GET` | Returns webhook details and delivery attempts. |
+| `/api/v1/webhooks/{id}/replay` | `POST` | Resets a webhook and schedules immediate replay. |
+| `/api/v1/stats` | `GET` | Returns dashboard aggregate counts and success rate. |
+| `/metrics` | `GET` | Prometheus-style operational metrics. |
+| `/health` | `GET` | Health check. |
+
+## Development
+
+Install backend dependencies:
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+```
+
+Run tests:
+
+```bash
+python -m pytest
+```
+
+Run live API integration tests against a running Hermes instance:
+
+```bash
+set HERMES_TEST_BASE_URL=http://localhost:8000
+python -m pytest tests/test_api_integration.py
+```
+
+On macOS/Linux:
+
+```bash
+HERMES_TEST_BASE_URL=http://localhost:8000 python -m pytest tests/test_api_integration.py
+```
+
+When run inside Docker Compose, the integration tests use `http://downstream:9000/ok` and `http://downstream:9000/fail` by default, so they do not depend on external services.
+
+Run migrations for production-style schema management:
+
+```bash
+alembic upgrade head
+```
+
+Run the API locally:
+
+```bash
+uvicorn app.main:app --reload
+```
+
+## Resume-Ready Highlights
+
+- Designed a reliable webhook delivery proxy with durable PostgreSQL queueing.
+- Implemented concurrent workers using `SELECT ... FOR UPDATE SKIP LOCKED`.
+- Added retry scheduling, dead letter handling, replay, and delivery audit logs.
+- Built a full developer console with live polling and detailed delivery inspection.
+- Added production-minded controls including API key enforcement, destination validation, idempotency, structured logs, metrics, config templates, tests, and CI.
+
+## Interview Pitch
+
+Hermes is a self-hosted webhook reliability layer. It accepts webhook events quickly, persists them in PostgreSQL, safely distributes delivery work across concurrent async workers using `SKIP LOCKED`, retries failed deliveries with exponential backoff, preserves dead-lettered events for inspection, and exposes replay, metrics, structured logs, and a dashboard for operations.

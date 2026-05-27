@@ -3,20 +3,22 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 from uuid import UUID
-from fastapi import FastAPI, Depends, HTTPException, Query, Request, status
+from fastapi import FastAPI, Depends, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select, func, desc, update
+from sqlalchemy import select, func, desc
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import get_db, init_db
+from app.logging_config import configure_logging
 from app.models import Webhook, WebhookStatus, DeliveryAttempt
 from app.schemas import WebhookResponse, WebhookDetailResponse, DashboardStats
+from app.security import require_api_key, validate_destination_url
 from app.worker import WorkerPool
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+configure_logging()
 logger = logging.getLogger("hermes.api")
 
 # Worker pool instance
@@ -30,8 +32,11 @@ async def lifespan(app: FastAPI):
     2. Starts the background worker pool.
     3. Gracefully shuts down the worker pool on termination.
     """
-    logger.info("Initializing database...")
-    await init_db()
+    if settings.AUTO_CREATE_TABLES:
+        logger.info("Initializing database...")
+        await init_db()
+    else:
+        logger.info("Skipping automatic table creation because AUTO_CREATE_TABLES=false")
     
     logger.info("Starting background worker pool...")
     worker_pool.start()
@@ -74,17 +79,14 @@ EXCLUDED_INGEST_HEADERS = {
 async def ingest_webhook(
     request: Request,
     url: str = Query(..., description="The downstream destination URL for this webhook"),
+    _: None = Depends(require_api_key),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Generic ingestion endpoint. Accepts any headers and body, writes immediately
     to Postgres, and returns a 200 OK so the sender assumes delivery succeeded.
     """
-    if not (url.startswith("http://") or url.startswith("https://")):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, 
-            detail="Destination URL must begin with http:// or https://"
-        )
+    destination_url = validate_destination_url(url)
 
     # 1. Capture payload body (as JSON, fallback to raw string if parsing fails)
     try:
@@ -100,24 +102,92 @@ async def ingest_webhook(
         if key.lower() not in EXCLUDED_INGEST_HEADERS:
             headers[key] = val
 
+    idempotency_key = request.headers.get("Idempotency-Key") or request.headers.get("X-Hermes-Idempotency-Key")
+    if idempotency_key:
+        existing_result = await db.execute(
+            select(Webhook).where(
+                Webhook.destination_url == destination_url,
+                Webhook.idempotency_key == idempotency_key,
+            )
+        )
+        existing_webhook = existing_result.scalar_one_or_none()
+        if existing_webhook:
+            logger.info(
+                "Duplicate webhook ingestion resolved by idempotency key.",
+                extra={
+                    "event": "webhook.ingest.duplicate",
+                    "webhook_id": str(existing_webhook.id),
+                    "destination_url": destination_url,
+                    "idempotency_key": idempotency_key,
+                },
+            )
+            return {
+                "success": True,
+                "webhook_id": str(existing_webhook.id),
+                "duplicate": True,
+                "message": "Webhook already ingested for this idempotency key",
+            }
+
     # 3. Write to PostgreSQL durably
     webhook = Webhook(
-        destination_url=url,
+        destination_url=destination_url,
         payload=payload,
         headers=headers,
-        status=WebhookStatus.PENDING,
+        idempotency_key=idempotency_key,
+        status=WebhookStatus.PENDING.value,
         max_retries=settings.DEFAULT_MAX_RETRIES
     )
     
     db.add(webhook)
-    await db.flush() # Flushes to get the database generated UUID instantly
+    try:
+        await db.flush() # Flushes to get the database generated UUID instantly
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        if not idempotency_key:
+            raise
+
+        existing_result = await db.execute(
+            select(Webhook).where(
+                Webhook.destination_url == destination_url,
+                Webhook.idempotency_key == idempotency_key,
+            )
+        )
+        existing_webhook = existing_result.scalar_one_or_none()
+        if not existing_webhook:
+            raise
+
+        logger.info(
+            "Duplicate webhook ingestion resolved after unique constraint race.",
+            extra={
+                "event": "webhook.ingest.duplicate_race",
+                "webhook_id": str(existing_webhook.id),
+                "destination_url": destination_url,
+                "idempotency_key": idempotency_key,
+            },
+        )
+        return {
+            "success": True,
+            "webhook_id": str(existing_webhook.id),
+            "duplicate": True,
+            "message": "Webhook already ingested for this idempotency key",
+        }
     
-    logger.info(f"Ingested webhook {webhook.id} targeting {url} successfully.")
+    logger.info(
+        "Webhook ingested and queued.",
+        extra={
+            "event": "webhook.ingest.created",
+            "webhook_id": str(webhook.id),
+            "destination_url": destination_url,
+            "idempotency_key": idempotency_key,
+        },
+    )
     
     # Return immediately to the client (200 OK)
     return {
         "success": True,
         "webhook_id": str(webhook.id),
+        "duplicate": False,
         "message": "Webhook ingested and queued for delivery"
     }
 
@@ -126,6 +196,7 @@ async def list_webhooks(
     status_filter: Optional[str] = Query(None, alias="status"),
     page: int = Query(1, ge=1),
     limit: int = Query(25, ge=1, le=100),
+    _: None = Depends(require_api_key),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -167,6 +238,7 @@ async def list_webhooks(
 @app.get("/api/v1/webhooks/{webhook_id}", response_model=WebhookDetailResponse)
 async def get_webhook_details(
     webhook_id: UUID,
+    _: None = Depends(require_api_key),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -187,6 +259,7 @@ async def get_webhook_details(
 @app.post("/api/v1/webhooks/{webhook_id}/replay")
 async def replay_webhook(
     webhook_id: UUID,
+    _: None = Depends(require_api_key),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -205,13 +278,16 @@ async def replay_webhook(
         )
 
     # Reset attempt tracking parameters
-    webhook.status = WebhookStatus.PENDING
+    webhook.status = WebhookStatus.PENDING.value
     webhook.retry_count = 0
     webhook.next_attempt_at = func.now()
     webhook.updated_at = func.now()
     
     await db.commit()
-    logger.info(f"Manual replay triggered for webhook {webhook_id}")
+    logger.info(
+        "Manual replay triggered.",
+        extra={"event": "webhook.replay.requested", "webhook_id": str(webhook_id)},
+    )
     
     return {
         "success": True,
@@ -219,7 +295,10 @@ async def replay_webhook(
     }
 
 @app.get("/api/v1/stats", response_model=DashboardStats)
-async def get_stats(db: AsyncSession = Depends(get_db)):
+async def get_stats(
+    _: None = Depends(require_api_key),
+    db: AsyncSession = Depends(get_db)
+):
     """
     Computes real-time statistics of webhook executions for the dashboard.
     """
@@ -227,10 +306,10 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
     total = await db.scalar(select(func.count(Webhook.id))) or 0
     
     # 2. Count by status
-    pending = await db.scalar(select(func.count(Webhook.id)).where(Webhook.status == WebhookStatus.PENDING)) or 0
-    processing = await db.scalar(select(func.count(Webhook.id)).where(Webhook.status == WebhookStatus.PROCESSING)) or 0
-    completed = await db.scalar(select(func.count(Webhook.id)).where(Webhook.status == WebhookStatus.COMPLETED)) or 0
-    failed = await db.scalar(select(func.count(Webhook.id)).where(Webhook.status == WebhookStatus.FAILED)) or 0
+    pending = await db.scalar(select(func.count(Webhook.id)).where(Webhook.status == WebhookStatus.PENDING.value)) or 0
+    processing = await db.scalar(select(func.count(Webhook.id)).where(Webhook.status == WebhookStatus.PROCESSING.value)) or 0
+    completed = await db.scalar(select(func.count(Webhook.id)).where(Webhook.status == WebhookStatus.COMPLETED.value)) or 0
+    failed = await db.scalar(select(func.count(Webhook.id)).where(Webhook.status == WebhookStatus.FAILED.value)) or 0
 
     # 3. Calculate success rate based on terminal states (completed / (completed + failed))
     terminal_total = completed + failed
@@ -245,6 +324,36 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
         "success_rate": round(success_rate, 1)
     }
 
+@app.get("/metrics")
+async def get_metrics(
+    _: None = Depends(require_api_key),
+    db: AsyncSession = Depends(get_db)
+):
+    total = await db.scalar(select(func.count(Webhook.id))) or 0
+    pending = await db.scalar(select(func.count(Webhook.id)).where(Webhook.status == WebhookStatus.PENDING.value)) or 0
+    processing = await db.scalar(select(func.count(Webhook.id)).where(Webhook.status == WebhookStatus.PROCESSING.value)) or 0
+    completed = await db.scalar(select(func.count(Webhook.id)).where(Webhook.status == WebhookStatus.COMPLETED.value)) or 0
+    failed = await db.scalar(select(func.count(Webhook.id)).where(Webhook.status == WebhookStatus.FAILED.value)) or 0
+    attempts = await db.scalar(select(func.count(DeliveryAttempt.id))) or 0
+
+    body = "\n".join([
+        "# HELP hermes_webhooks_total Total ingested webhooks.",
+        "# TYPE hermes_webhooks_total gauge",
+        f"hermes_webhooks_total {total}",
+        "# HELP hermes_webhooks_by_status Webhooks grouped by delivery status.",
+        "# TYPE hermes_webhooks_by_status gauge",
+        f'hermes_webhooks_by_status{{status="pending"}} {pending}',
+        f'hermes_webhooks_by_status{{status="processing"}} {processing}',
+        f'hermes_webhooks_by_status{{status="completed"}} {completed}',
+        f'hermes_webhooks_by_status{{status="failed"}} {failed}',
+        "# HELP hermes_delivery_attempts_total Total delivery attempts.",
+        "# TYPE hermes_delivery_attempts_total gauge",
+        f"hermes_delivery_attempts_total {attempts}",
+        "",
+    ])
+
+    return Response(content=body, media_type="text/plain; version=0.0.4")
+
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
@@ -253,4 +362,3 @@ async def health_check():
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIR = os.path.abspath(os.path.join(CURRENT_DIR, "..", "..", "frontend"))
 app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
-

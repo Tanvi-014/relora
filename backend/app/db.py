@@ -1,4 +1,5 @@
 from typing import AsyncGenerator
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from app.config import settings
 from app.models import Base
@@ -42,3 +43,9 @@ async def init_db() -> None:
     """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(text("ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR"))
+        await conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_webhooks_destination_idempotency_key
+            ON webhooks (destination_url, idempotency_key)
+            WHERE idempotency_key IS NOT NULL
+        """))

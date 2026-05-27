@@ -9,11 +9,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import async_session
+from app.logging_config import configure_logging
 from app.models import Webhook, WebhookStatus, DeliveryAttempt
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+configure_logging()
 logger = logging.getLogger("hermes.worker")
+
+
+def calculate_backoff_seconds(retry_count: int) -> int:
+    return settings.BACKOFF_BASE_SECONDS * (2 ** retry_count)
 
 class WebhookWorker:
     def __init__(self, worker_id: int):
@@ -24,7 +28,7 @@ class WebhookWorker:
     def start(self):
         self.is_running = True
         self.task = asyncio.create_task(self._run_loop())
-        logger.info(f"Worker {self.worker_id} started.")
+        logger.info("Worker started.", extra={"event": "worker.started", "worker_id": self.worker_id})
 
     async def stop(self):
         self.is_running = False
@@ -33,7 +37,7 @@ class WebhookWorker:
                 await self.task
             except asyncio.CancelledError:
                 pass
-        logger.info(f"Worker {self.worker_id} stopped.")
+        logger.info("Worker stopped.", extra={"event": "worker.stopped", "worker_id": self.worker_id})
 
     async def _run_loop(self):
         async with httpx.AsyncClient(timeout=settings.HTTP_CLIENT_TIMEOUT_SECONDS) as client:
@@ -46,7 +50,11 @@ class WebhookWorker:
                 except asyncio.CancelledError:
                     break
                 except Exception as e:
-                    logger.error(f"Worker {self.worker_id} encountered an error: {e}", exc_info=True)
+                    logger.error(
+                        "Worker loop error.",
+                        exc_info=True,
+                        extra={"event": "worker.loop_error", "worker_id": self.worker_id},
+                    )
                     await asyncio.sleep(2)
 
     async def _process_next_job(self, client: httpx.AsyncClient) -> bool:
@@ -78,7 +86,16 @@ class WebhookWorker:
 
             webhook_id, destination_url, payload, headers, retry_count, max_retries = row
             
-            logger.info(f"Worker {self.worker_id} claimed webhook {webhook_id} targeting {destination_url}")
+            logger.info(
+                "Worker claimed webhook.",
+                extra={
+                    "event": "webhook.claimed",
+                    "worker_id": self.worker_id,
+                    "webhook_id": str(webhook_id),
+                    "destination_url": destination_url,
+                    "retry_count": retry_count,
+                },
+            )
             
             # Perform delivery in an isolated try-except block so failure doesn't crash the worker
             await self._deliver_webhook(session, client, webhook_id, destination_url, payload, headers, retry_count, max_retries)
@@ -148,7 +165,17 @@ class WebhookWorker:
         now = datetime.now(timezone.utc)
         
         if success:
-            logger.info(f"Successfully delivered webhook {webhook_id} on attempt {attempt_number}")
+            logger.info(
+                "Webhook delivered successfully.",
+                extra={
+                    "event": "webhook.delivery.succeeded",
+                    "worker_id": self.worker_id,
+                    "webhook_id": str(webhook_id),
+                    "attempt_number": attempt_number,
+                    "status_code": status_code,
+                    "duration_ms": duration_ms,
+                },
+            )
             # Complete webhook
             await session.execute(
                 text("""
@@ -160,13 +187,34 @@ class WebhookWorker:
             )
         else:
             new_retry_count = retry_count + 1
-            logger.warning(f"Failed to deliver webhook {webhook_id} (Attempt {attempt_number}). Error: {error_message}")
+            logger.warning(
+                "Webhook delivery failed.",
+                extra={
+                    "event": "webhook.delivery.failed",
+                    "worker_id": self.worker_id,
+                    "webhook_id": str(webhook_id),
+                    "attempt_number": attempt_number,
+                    "status_code": status_code,
+                    "duration_ms": duration_ms,
+                    "error_message": error_message,
+                },
+            )
             
             if new_retry_count < max_retries:
                 # Calculate exponential backoff
-                backoff_seconds = settings.BACKOFF_BASE_SECONDS * (2 ** retry_count)
+                backoff_seconds = calculate_backoff_seconds(retry_count)
                 next_attempt = now + timedelta(seconds=backoff_seconds)
-                logger.info(f"Re-queueing webhook {webhook_id} for retry at {next_attempt} (in {backoff_seconds}s)")
+                logger.info(
+                    "Webhook scheduled for retry.",
+                    extra={
+                        "event": "webhook.retry.scheduled",
+                        "worker_id": self.worker_id,
+                        "webhook_id": str(webhook_id),
+                        "retry_count": new_retry_count,
+                        "backoff_seconds": backoff_seconds,
+                        "next_attempt_at": next_attempt.isoformat(),
+                    },
+                )
                 
                 await session.execute(
                     text("""
@@ -184,7 +232,15 @@ class WebhookWorker:
                 )
             else:
                 # Mark as permanently failed (Dead Letter Queue)
-                logger.error(f"Webhook {webhook_id} exceeded max retries. Moving to Dead Letter Queue.")
+                logger.error(
+                    "Webhook moved to dead letter queue.",
+                    extra={
+                        "event": "webhook.dlq.created",
+                        "worker_id": self.worker_id,
+                        "webhook_id": str(webhook_id),
+                        "retry_count": new_retry_count,
+                    },
+                )
                 await session.execute(
                     text("""
                         UPDATE webhooks
@@ -213,11 +269,11 @@ class WorkerPool:
         self.workers = [WebhookWorker(i) for i in range(concurrency)]
 
     def start(self):
-        logger.info(f"Starting worker pool with {self.concurrency} concurrent workers...")
+        logger.info("Starting worker pool.", extra={"event": "worker_pool.starting", "concurrency": self.concurrency})
         for worker in self.workers:
             worker.start()
 
     async def stop(self):
-        logger.info("Stopping worker pool...")
+        logger.info("Stopping worker pool.", extra={"event": "worker_pool.stopping", "concurrency": self.concurrency})
         await asyncio.gather(*(worker.stop() for worker in self.workers))
-        logger.info("Worker pool stopped successfully.")
+        logger.info("Worker pool stopped.", extra={"event": "worker_pool.stopped", "concurrency": self.concurrency})

@@ -1,5 +1,6 @@
 // Hermes Webhook Console Application Script
 const API_BASE = '/api/v1';
+const API_KEY_STORAGE_KEY = 'hermes_api_key';
 
 // Application State
 let state = {
@@ -17,6 +18,8 @@ let state = {
     selectedWebhookId: null,
     pollingInterval: null
 };
+
+let apiKey = localStorage.getItem(API_KEY_STORAGE_KEY) || '';
 
 // DOM Cache
 const dom = {
@@ -102,7 +105,7 @@ async function refreshAll(isPoll = false) {
 // Fetch stats from backend API
 async function fetchStats() {
     try {
-        const res = await fetch(`${API_BASE}/stats`);
+        const res = await fetchApi(`${API_BASE}/stats`);
         if (!res.ok) throw new Error('Failed to fetch statistics');
         const data = await res.json();
         
@@ -137,7 +140,7 @@ async function fetchWebhooks(isPoll = false) {
             url += `&status=${state.activeFilter}`;
         }
         
-        const res = await fetch(url);
+        const res = await fetchApi(url);
         if (!res.ok) throw new Error('Failed to fetch webhooks list');
         const data = await res.json();
         
@@ -206,7 +209,7 @@ async function handleRowClick(id) {
 // Fetch full detail of a webhook (payload, headers, attempts)
 async function fetchWebhookDetails(id, isPoll = false) {
     try {
-        const res = await fetch(`${API_BASE}/webhooks/${id}`);
+        const res = await fetchApi(`${API_BASE}/webhooks/${id}`);
         if (!res.ok) throw new Error('Failed to fetch details');
         const webhook = await res.json();
         
@@ -290,7 +293,7 @@ function renderInspector(w) {
 // Handle trigger manual replay
 async function handleReplay(id) {
     try {
-        const res = await fetch(`${API_BASE}/webhooks/${id}/replay`, { method: 'POST' });
+        const res = await fetchApi(`${API_BASE}/webhooks/${id}/replay`, { method: 'POST' });
         if (!res.ok) throw new Error('Replay trigger failed');
         
         // Show immediate loading/pending state
@@ -298,6 +301,35 @@ async function handleReplay(id) {
     } catch (err) {
         alert(`Failed to trigger replay: ${err.message}`);
     }
+}
+
+async function fetchApi(url, options = {}) {
+    const headers = new Headers(options.headers || {});
+    if (apiKey) {
+        headers.set('X-Hermes-API-Key', apiKey);
+    }
+
+    let response = await fetch(url, { ...options, headers });
+    if (response.status !== 401) {
+        return response;
+    }
+
+    const nextKey = prompt('Enter Hermes API key');
+    if (!nextKey) {
+        return response;
+    }
+
+    apiKey = nextKey.trim();
+    localStorage.setItem(API_KEY_STORAGE_KEY, apiKey);
+    headers.set('X-Hermes-API-Key', apiKey);
+    response = await fetch(url, { ...options, headers });
+
+    if (response.status === 401) {
+        localStorage.removeItem(API_KEY_STORAGE_KEY);
+        apiKey = '';
+    }
+
+    return response;
 }
 
 // Close Details Inspector panel

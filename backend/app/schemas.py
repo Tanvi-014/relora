@@ -18,6 +18,7 @@ class DeliveryAttemptResponse(BaseModel):
 class WebhookResponse(BaseModel):
     id: UUID
     destination_url: str
+    idempotency_key: Optional[str] = None
     status: str
     retry_count: int
     max_retries: int
