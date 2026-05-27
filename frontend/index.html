@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hermes Webhook Console</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- Header Section -->
+    <header>
+        <div class="logo-container">
+            <span class="logo-text">Hermes</span>
+            <span class="logo-badge">v1.0.0</span>
+        </div>
+        <div class="header-actions">
+            <div class="status-indicator">
+                <span class="status-dot"></span>
+                <span>Active worker pool connected</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main>
+        
+        <!-- Sidebar filters -->
+        <div class="sidebar">
+            <h3 class="sidebar-title">Status Filter</h3>
+            <button class="filter-btn active" data-status="all">
+                <span>All Webhooks</span>
+                <span class="badge-count" id="count-all">0</span>
+            </button>
+            <button class="filter-btn" data-status="pending">
+                <span>Pending</span>
+                <span class="badge-count" id="count-pending">0</span>
+            </button>
+            <button class="filter-btn" data-status="processing">
+                <span>Processing</span>
+                <span class="badge-count" id="count-processing">0</span>
+            </button>
+            <button class="filter-btn" data-status="completed">
+                <span>Completed</span>
+                <span class="badge-count" id="count-completed">0</span>
+            </button>
+            <button class="filter-btn" data-status="failed">
+                <span>Failed (DLQ)</span>
+                <span class="badge-count" id="count-failed">0</span>
+            </button>
+        </div>
+
+        <!-- Dashboard content area -->
+        <div class="dashboard-content">
+            
+            <!-- Aggregated Metric Cards -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <span class="stat-label">Total Ingested</span>
+                    <span class="stat-value" id="stat-total">0</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Active Queue</span>
+                    <span class="stat-value" id="stat-active">0</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Success Rate</span>
+                    <span class="stat-value" id="stat-success">100.0%</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label" style="color: var(--color-rose);">Dead Letter Queue</span>
+                    <span class="stat-value" id="stat-failed" style="color: var(--color-rose);">0</span>
+                </div>
+            </div>
+
+            <!-- Ingestion Search Bar -->
+            <div class="search-container">
+                <input type="text" id="search-input" class="search-input" placeholder="Search by Destination URL...">
+                <button class="btn btn-secondary" id="refresh-btn">Refresh</button>
+            </div>
+
+            <!-- Webhook Data Table -->
+            <div class="table-section">
+                <table id="webhooks-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 80px;">Status</th>
+                            <th>Destination URL</th>
+                            <th style="width: 90px; text-align: right;">Attempts</th>
+                            <th style="width: 170px;">Last Delivery Attempt</th>
+                            <th style="width: 170px;">Created At</th>
+                        </tr>
+                    </thead>
+                    <tbody id="webhooks-tbody">
+                        <!-- Filled by Javascript dynamically -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Details split panel inspector (Hidden by default) -->
+        <div class="inspector-panel" id="inspector-panel">
+            <div class="inspector-header">
+                <h2 class="inspector-title">Inspect Webhook</h2>
+                <button class="inspector-close" id="inspector-close-btn">&times;</button>
+            </div>
+            
+            <div class="inspector-body">
+                <!-- Action Controls -->
+                <div class="inspect-section" style="flex-direction: row; gap: 12px;" id="inspect-actions">
+                    <!-- Loaded dynamically, e.g. Manual Replay Button -->
+                </div>
+
+                <!-- Webhook Meta Info -->
+                <div class="inspect-section">
+                    <h4 class="inspect-section-title">Delivery Details</h4>
+                    <div class="metadata-grid">
+                        <span class="metadata-label">ID</span>
+                        <span class="metadata-value mono" id="inspect-id">-</span>
+
+                        <span class="metadata-label">Status</span>
+                        <span class="metadata-value" id="inspect-status">-</span>
+
+                        <span class="metadata-label">Destination</span>
+                        <span class="metadata-value mono" id="inspect-url" style="word-break: break-all;">-</span>
+
+                        <span class="metadata-label">Attempts</span>
+                        <span class="metadata-value" id="inspect-attempts">-</span>
+
+                        <span class="metadata-label">Next Attempt At</span>
+                        <span class="metadata-value mono" id="inspect-next-attempt">-</span>
+                    </div>
+                </div>
+
+                <!-- Request Headers -->
+                <div class="inspect-section">
+                    <h4 class="inspect-section-title">Request Headers</h4>
+                    <pre><code id="inspect-headers">{}</code></pre>
+                </div>
+
+                <!-- Request Body -->
+                <div class="inspect-section">
+                    <h4 class="inspect-section-title">Request Payload</h4>
+                    <pre><code id="inspect-payload">{}</code></pre>
+                </div>
+
+                <!-- History of attempts -->
+                <div class="inspect-section">
+                    <h4 class="inspect-section-title">Execution Attempts Log</h4>
+                    <div class="attempts-list" id="inspect-attempts-list">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>

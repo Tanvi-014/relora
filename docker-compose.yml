@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: hermes-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: hermes
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d hermes"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  hermes:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: hermes-app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/hermes
+      - SYNC_DATABASE_URL=postgresql://postgres:postgres@db:5432/hermes
+      - WORKER_CONCURRENCY=5
+      - WORKER_POLL_INTERVAL_SECONDS=1
+      - DEFAULT_MAX_RETRIES=5
+      - BACKOFF_BASE_SECONDS=15 # Speed up retry backoff slightly in local compose development
+      - HTTP_CLIENT_TIMEOUT_SECONDS=5
+    volumes:
+      # Live reload volume mounts for seamless development loop
+      - ./backend:/workspace/backend
+      - ./frontend:/workspace/frontend
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
