@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import json
 import logging
 import os
 from typing import Any, Dict, List, Optional
@@ -14,8 +15,10 @@ from app.config import settings
 from app.db import get_db, init_db
 from app.logging_config import configure_logging
 from app.models import Webhook, WebhookStatus, DeliveryAttempt
+from app.routing import apply_transform, event_matches_filter, extract_event_id
 from app.schemas import WebhookResponse, WebhookDetailResponse, DashboardStats
 from app.security import require_api_key, validate_destination_url
+from app.signatures import verify_webhook_signature
 from app.worker import WorkerPool
 
 configure_logging()
@@ -78,23 +81,65 @@ EXCLUDED_INGEST_HEADERS = {
 @app.post("/api/v1/ingest", status_code=status.HTTP_200_OK)
 async def ingest_webhook(
     request: Request,
-    url: str = Query(..., description="The downstream destination URL for this webhook"),
-    _: None = Depends(require_api_key),
+    url: Optional[str] = Query(None, description="The downstream destination URL for this webhook"),
+    urls: Optional[List[str]] = Query(None, description="Additional downstream URLs for fan-out delivery"),
+    filter_expression: Optional[str] = Query(None, alias="filter", description="Simple filter, for example event.type == 'payment.succeeded'"),
+    transform: Optional[str] = Query(None, description="JSON object mapping output fields to source paths"),
+    signature_provider: Optional[str] = Query(None, description="Optional signature provider: stripe, github, or hermes"),
+    tenant_id: str = Depends(require_api_key),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Generic ingestion endpoint. Accepts any headers and body, writes immediately
     to Postgres, and returns a 200 OK so the sender assumes delivery succeeded.
     """
-    destination_url = validate_destination_url(url)
+    destination_candidates: List[str] = []
+    if url:
+        destination_candidates.append(url)
+    if urls:
+        for item in urls:
+            destination_candidates.extend([part.strip() for part in item.split(",") if part.strip()])
 
-    # 1. Capture payload body (as JSON, fallback to raw string if parsing fails)
+    if not destination_candidates:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one destination is required via url or urls",
+        )
+
+    destination_urls = [validate_destination_url(destination) for destination in destination_candidates]
+
+    # 1. Capture raw body once so signature verification and JSON parsing use identical bytes.
+    raw_body = await request.body()
+    verify_webhook_signature(signature_provider, request, raw_body)
+
     try:
-        payload = await request.json()
+        payload = json.loads(raw_body.decode("utf-8"))
     except Exception:
         # If payload isn't JSON, read raw body as text and wrap it
-        body_bytes = await request.body()
-        payload = {"_raw_body": body_bytes.decode("utf-8", errors="replace")}
+        payload = {"_raw_body": raw_body.decode("utf-8", errors="replace")}
+
+    explicit_event_id = request.headers.get("X-Event-Id") or request.headers.get("X-Hermes-Event-Id")
+    event_id = extract_event_id(payload, explicit_event_id)
+
+    if not event_matches_filter(payload, filter_expression):
+        logger.info(
+            "Webhook filtered before queueing.",
+            extra={
+                "event": "webhook.ingest.filtered",
+                "tenant_id": tenant_id,
+                "event_id": event_id,
+                "filter": filter_expression,
+                "destination_count": len(destination_urls),
+            },
+        )
+        return {
+            "success": True,
+            "filtered": True,
+            "webhook_ids": [],
+            "message": "Webhook did not match filter and was not queued",
+        }
+
+    delivery_payload = apply_transform(payload, transform)
 
     # 2. Extract and filter headers
     headers: Dict[str, str] = {}
@@ -102,92 +147,102 @@ async def ingest_webhook(
         if key.lower() not in EXCLUDED_INGEST_HEADERS:
             headers[key] = val
 
-    idempotency_key = request.headers.get("Idempotency-Key") or request.headers.get("X-Hermes-Idempotency-Key")
-    if idempotency_key:
+    idempotency_key = request.headers.get("Idempotency-Key") or request.headers.get("X-Hermes-Idempotency-Key") or event_id
+    webhook_ids: List[str] = []
+    duplicate_ids: List[str] = []
+
+    for destination_url in destination_urls:
         existing_result = await db.execute(
             select(Webhook).where(
+                Webhook.tenant_id == tenant_id,
                 Webhook.destination_url == destination_url,
                 Webhook.idempotency_key == idempotency_key,
             )
         )
         existing_webhook = existing_result.scalar_one_or_none()
         if existing_webhook:
+            webhook_ids.append(str(existing_webhook.id))
+            duplicate_ids.append(str(existing_webhook.id))
             logger.info(
                 "Duplicate webhook ingestion resolved by idempotency key.",
                 extra={
                     "event": "webhook.ingest.duplicate",
                     "webhook_id": str(existing_webhook.id),
+                    "tenant_id": tenant_id,
+                    "event_id": event_id,
                     "destination_url": destination_url,
                     "idempotency_key": idempotency_key,
                 },
             )
-            return {
-                "success": True,
-                "webhook_id": str(existing_webhook.id),
-                "duplicate": True,
-                "message": "Webhook already ingested for this idempotency key",
-            }
+            continue
 
-    # 3. Write to PostgreSQL durably
-    webhook = Webhook(
-        destination_url=destination_url,
-        payload=payload,
-        headers=headers,
-        idempotency_key=idempotency_key,
-        status=WebhookStatus.PENDING.value,
-        max_retries=settings.DEFAULT_MAX_RETRIES
-    )
-    
-    db.add(webhook)
-    try:
-        await db.flush() # Flushes to get the database generated UUID instantly
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        if not idempotency_key:
-            raise
-
-        existing_result = await db.execute(
-            select(Webhook).where(
-                Webhook.destination_url == destination_url,
-                Webhook.idempotency_key == idempotency_key,
-            )
+        webhook = Webhook(
+            tenant_id=tenant_id,
+            event_id=event_id,
+            destination_url=destination_url,
+            payload=delivery_payload,
+            headers=headers,
+            idempotency_key=idempotency_key,
+            status=WebhookStatus.PENDING.value,
+            max_retries=settings.DEFAULT_MAX_RETRIES
         )
-        existing_webhook = existing_result.scalar_one_or_none()
-        if not existing_webhook:
-            raise
+
+        db.add(webhook)
+        try:
+            await db.flush()
+            await db.commit()
+            webhook_ids.append(str(webhook.id))
+        except IntegrityError:
+            await db.rollback()
+            existing_result = await db.execute(
+                select(Webhook).where(
+                    Webhook.tenant_id == tenant_id,
+                    Webhook.destination_url == destination_url,
+                    Webhook.idempotency_key == idempotency_key,
+                )
+            )
+            existing_webhook = existing_result.scalar_one_or_none()
+            if not existing_webhook:
+                raise
+            webhook_ids.append(str(existing_webhook.id))
+            duplicate_ids.append(str(existing_webhook.id))
 
         logger.info(
-            "Duplicate webhook ingestion resolved after unique constraint race.",
+            "Webhook destination queued.",
             extra={
-                "event": "webhook.ingest.duplicate_race",
-                "webhook_id": str(existing_webhook.id),
+                "event": "webhook.ingest.destination_queued",
+                "webhook_id": webhook_ids[-1],
+                "tenant_id": tenant_id,
+                "event_id": event_id,
                 "destination_url": destination_url,
                 "idempotency_key": idempotency_key,
             },
         )
-        return {
-            "success": True,
-            "webhook_id": str(existing_webhook.id),
-            "duplicate": True,
-            "message": "Webhook already ingested for this idempotency key",
-        }
-    
+
     logger.info(
-        "Webhook ingested and queued.",
+        "Webhook ingestion completed.",
         extra={
-            "event": "webhook.ingest.created",
-            "webhook_id": str(webhook.id),
-            "destination_url": destination_url,
-            "idempotency_key": idempotency_key,
+            "event": "webhook.ingest.completed",
+            "tenant_id": tenant_id,
+            "event_id": event_id,
+            "destination_count": len(destination_urls),
+            "queued_count": len(webhook_ids) - len(duplicate_ids),
+            "duplicate_count": len(duplicate_ids),
+            "signature_provider": signature_provider,
         },
     )
     
     # Return immediately to the client (200 OK)
+    single = len(webhook_ids) == 1
     return {
         "success": True,
-        "webhook_id": str(webhook.id),
-        "duplicate": False,
+        "filtered": False,
+        "event_id": event_id,
+        "tenant_id": tenant_id,
+        "webhook_id": webhook_ids[0] if single else None,
+        "webhook_ids": webhook_ids,
+        "duplicate": len(duplicate_ids) == len(webhook_ids),
+        "duplicate_ids": duplicate_ids,
         "message": "Webhook ingested and queued for delivery"
     }
 
@@ -196,7 +251,7 @@ async def list_webhooks(
     status_filter: Optional[str] = Query(None, alias="status"),
     page: int = Query(1, ge=1),
     limit: int = Query(25, ge=1, le=100),
-    _: None = Depends(require_api_key),
+    tenant_id: str = Depends(require_api_key),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -208,6 +263,9 @@ async def list_webhooks(
     # 1. Build Query
     stmt = select(Webhook).order_by(desc(Webhook.created_at))
     count_stmt = select(func.count(Webhook.id))
+    if settings.api_key_tenants:
+        stmt = stmt.where(Webhook.tenant_id == tenant_id)
+        count_stmt = count_stmt.where(Webhook.tenant_id == tenant_id)
     
     if status_filter:
         try:
@@ -238,13 +296,15 @@ async def list_webhooks(
 @app.get("/api/v1/webhooks/{webhook_id}", response_model=WebhookDetailResponse)
 async def get_webhook_details(
     webhook_id: UUID,
-    _: None = Depends(require_api_key),
+    tenant_id: str = Depends(require_api_key),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Retrieves full details for a single webhook, including its logs/attempts.
     """
     stmt = select(Webhook).where(Webhook.id == webhook_id)
+    if settings.api_key_tenants:
+        stmt = stmt.where(Webhook.tenant_id == tenant_id)
     result = await db.execute(stmt)
     webhook = result.scalar_one_or_none()
     
@@ -259,7 +319,7 @@ async def get_webhook_details(
 @app.post("/api/v1/webhooks/{webhook_id}/replay")
 async def replay_webhook(
     webhook_id: UUID,
-    _: None = Depends(require_api_key),
+    tenant_id: str = Depends(require_api_key),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -268,6 +328,8 @@ async def replay_webhook(
     next_attempt_at to current timestamp.
     """
     stmt = select(Webhook).where(Webhook.id == webhook_id)
+    if settings.api_key_tenants:
+        stmt = stmt.where(Webhook.tenant_id == tenant_id)
     result = await db.execute(stmt)
     webhook = result.scalar_one_or_none()
     
@@ -286,7 +348,7 @@ async def replay_webhook(
     await db.commit()
     logger.info(
         "Manual replay triggered.",
-        extra={"event": "webhook.replay.requested", "webhook_id": str(webhook_id)},
+        extra={"event": "webhook.replay.requested", "webhook_id": str(webhook_id), "tenant_id": tenant_id, "event_id": webhook.event_id},
     )
     
     return {
@@ -296,20 +358,21 @@ async def replay_webhook(
 
 @app.get("/api/v1/stats", response_model=DashboardStats)
 async def get_stats(
-    _: None = Depends(require_api_key),
+    tenant_id: str = Depends(require_api_key),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Computes real-time statistics of webhook executions for the dashboard.
     """
     # 1. Total count
-    total = await db.scalar(select(func.count(Webhook.id))) or 0
+    tenant_filter = Webhook.tenant_id == tenant_id if settings.api_key_tenants else True
+    total = await db.scalar(select(func.count(Webhook.id)).where(tenant_filter)) or 0
     
     # 2. Count by status
-    pending = await db.scalar(select(func.count(Webhook.id)).where(Webhook.status == WebhookStatus.PENDING.value)) or 0
-    processing = await db.scalar(select(func.count(Webhook.id)).where(Webhook.status == WebhookStatus.PROCESSING.value)) or 0
-    completed = await db.scalar(select(func.count(Webhook.id)).where(Webhook.status == WebhookStatus.COMPLETED.value)) or 0
-    failed = await db.scalar(select(func.count(Webhook.id)).where(Webhook.status == WebhookStatus.FAILED.value)) or 0
+    pending = await db.scalar(select(func.count(Webhook.id)).where(tenant_filter, Webhook.status == WebhookStatus.PENDING.value)) or 0
+    processing = await db.scalar(select(func.count(Webhook.id)).where(tenant_filter, Webhook.status == WebhookStatus.PROCESSING.value)) or 0
+    completed = await db.scalar(select(func.count(Webhook.id)).where(tenant_filter, Webhook.status == WebhookStatus.COMPLETED.value)) or 0
+    failed = await db.scalar(select(func.count(Webhook.id)).where(tenant_filter, Webhook.status == WebhookStatus.FAILED.value)) or 0
 
     # 3. Calculate success rate based on terminal states (completed / (completed + failed))
     terminal_total = completed + failed
@@ -326,15 +389,20 @@ async def get_stats(
 
 @app.get("/metrics")
 async def get_metrics(
-    _: None = Depends(require_api_key),
+    tenant_id: str = Depends(require_api_key),
     db: AsyncSession = Depends(get_db)
 ):
-    total = await db.scalar(select(func.count(Webhook.id))) or 0
-    pending = await db.scalar(select(func.count(Webhook.id)).where(Webhook.status == WebhookStatus.PENDING.value)) or 0
-    processing = await db.scalar(select(func.count(Webhook.id)).where(Webhook.status == WebhookStatus.PROCESSING.value)) or 0
-    completed = await db.scalar(select(func.count(Webhook.id)).where(Webhook.status == WebhookStatus.COMPLETED.value)) or 0
-    failed = await db.scalar(select(func.count(Webhook.id)).where(Webhook.status == WebhookStatus.FAILED.value)) or 0
-    attempts = await db.scalar(select(func.count(DeliveryAttempt.id))) or 0
+    tenant_filter = Webhook.tenant_id == tenant_id if settings.api_key_tenants else True
+    total = await db.scalar(select(func.count(Webhook.id)).where(tenant_filter)) or 0
+    pending = await db.scalar(select(func.count(Webhook.id)).where(tenant_filter, Webhook.status == WebhookStatus.PENDING.value)) or 0
+    processing = await db.scalar(select(func.count(Webhook.id)).where(tenant_filter, Webhook.status == WebhookStatus.PROCESSING.value)) or 0
+    completed = await db.scalar(select(func.count(Webhook.id)).where(tenant_filter, Webhook.status == WebhookStatus.COMPLETED.value)) or 0
+    failed = await db.scalar(select(func.count(Webhook.id)).where(tenant_filter, Webhook.status == WebhookStatus.FAILED.value)) or 0
+    attempts = await db.scalar(
+        select(func.count(DeliveryAttempt.id))
+        .join(Webhook, DeliveryAttempt.webhook_id == Webhook.id)
+        .where(tenant_filter)
+    ) or 0
 
     body = "\n".join([
         "# HELP hermes_webhooks_total Total ingested webhooks.",
@@ -353,6 +421,35 @@ async def get_metrics(
     ])
 
     return Response(content=body, media_type="text/plain; version=0.0.4")
+
+@app.get("/api/v1/usage")
+async def get_usage(
+    tenant_id: str = Depends(require_api_key),
+    db: AsyncSession = Depends(get_db)
+):
+    stmt = (
+        select(
+            Webhook.tenant_id,
+            func.count(Webhook.id).label("events"),
+            func.count(func.distinct(Webhook.event_id)).label("unique_events"),
+        )
+        .group_by(Webhook.tenant_id)
+        .order_by(Webhook.tenant_id)
+    )
+    if settings.api_key_tenants:
+        stmt = stmt.where(Webhook.tenant_id == tenant_id)
+
+    rows = (await db.execute(stmt)).all()
+    return {
+        "usage": [
+            {
+                "tenant_id": row.tenant_id,
+                "events": row.events,
+                "unique_events": row.unique_events,
+            }
+            for row in rows
+        ]
+    }
 
 @app.get("/health")
 async def health_check():

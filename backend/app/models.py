@@ -17,6 +17,8 @@ class Webhook(Base):
     __tablename__ = "webhooks"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(String, nullable=False, default="anonymous")
+    event_id = Column(String, nullable=False, default=lambda: str(uuid.uuid4()))
     destination_url = Column(String, nullable=False)
     payload = Column(JSONB, nullable=False)
     headers = Column(JSONB, nullable=False)
@@ -35,6 +37,8 @@ class Webhook(Base):
     def to_dict(self):
         return {
             "id": str(self.id),
+            "tenant_id": self.tenant_id,
+            "event_id": self.event_id,
             "destination_url": self.destination_url,
             "payload": self.payload,
             "headers": self.headers,
@@ -51,7 +55,9 @@ class Webhook(Base):
     __table_args__ = (
         Index("ix_webhooks_status_next_attempt_at", "status", "next_attempt_at"),
         Index("ix_webhooks_created_at", "created_at"),
-        Index("ix_webhooks_destination_idempotency_key", "destination_url", "idempotency_key", unique=True),
+        Index("ix_webhooks_tenant_created_at", "tenant_id", "created_at"),
+        Index("ix_webhooks_event_id", "event_id"),
+        Index("ix_webhooks_tenant_destination_idempotency_key", "tenant_id", "destination_url", "idempotency_key", unique=True),
     )
 
 class DeliveryAttempt(Base):

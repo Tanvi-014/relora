@@ -34,6 +34,11 @@ flowchart TD
 - Manual replay endpoint and dashboard action.
 - Header preservation with Hermes tracing headers.
 - Idempotency support using `Idempotency-Key` or `X-Hermes-Idempotency-Key`.
+- Fan-out routing to multiple destinations from one incoming event.
+- Simple destination filtering with expressions such as `event.type == 'payment.succeeded'`.
+- Lightweight payload transformation with JSON field mapping.
+- Optional Stripe, GitHub, or generic HMAC signature verification.
+- Tenant-aware API keys and usage metrics for billing-style event counts.
 - Structured JSON logs for ingestion, worker claiming, delivery, retry, DLQ, and replay events.
 - Developer console for stats, filtering, inspection, payloads, headers, attempts, and replay.
 - Optional `X-Hermes-API-Key` protection for API endpoints.
@@ -92,9 +97,42 @@ Important settings:
 | `DEFAULT_MAX_RETRIES` | Number of delivery attempts before DLQ. |
 | `BACKOFF_BASE_SECONDS` | Base interval for exponential backoff. |
 | `HERMES_API_KEY` | Optional API key. When set, clients must send `X-Hermes-API-Key`. |
+| `HERMES_API_KEYS` | Optional tenant API keys as `tenant_a:key_a,tenant_b:key_b`. |
 | `ALLOW_PRIVATE_DESTINATIONS` | Allows local/private destinations for demos. Set `false` in production. |
 | `DESTINATION_HOST_ALLOWLIST` | Optional comma-separated list of allowed destination hosts. |
+| `STRIPE_WEBHOOK_SECRET` | Secret used when `signature_provider=stripe`. |
+| `GITHUB_WEBHOOK_SECRET` | Secret used when `signature_provider=github`. |
+| `HERMES_WEBHOOK_SECRET` | Secret used when `signature_provider=hermes`. |
 | `AUTO_CREATE_TABLES` | Creates tables at startup for MVP/demo use. Production should use migrations. |
+
+## Routing Examples
+
+Fan out one event to multiple destinations:
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/ingest?url=http://localhost:9000/ok&urls=http://localhost:9000/ok?copy=analytics" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: evt_123" \
+  -d '{"event":{"id":"evt_123","type":"payment.succeeded","amount":2999}}'
+```
+
+Filter before queueing:
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/ingest?url=http://localhost:9000/ok&filter=event.type%20%3D%3D%20%27payment.succeeded%27" \
+  -H "Content-Type: application/json" \
+  -d '{"event":{"id":"evt_124","type":"payment.failed"}}'
+```
+
+Transform payload shape:
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/ingest?url=http://localhost:9000/ok&transform=%7B%22id%22%3A%22event.id%22%2C%22type%22%3A%22event.type%22%7D" \
+  -H "Content-Type: application/json" \
+  -d '{"event":{"id":"evt_125","type":"payment.succeeded"}}'
+```
+
+Enable signature verification by setting the provider secret, then pass `signature_provider=stripe`, `signature_provider=github`, or `signature_provider=hermes` on ingest.
 
 ## API Reference
 
@@ -105,6 +143,7 @@ Important settings:
 | `/api/v1/webhooks/{id}` | `GET` | Returns webhook details and delivery attempts. |
 | `/api/v1/webhooks/{id}/replay` | `POST` | Resets a webhook and schedules immediate replay. |
 | `/api/v1/stats` | `GET` | Returns dashboard aggregate counts and success rate. |
+| `/api/v1/usage` | `GET` | Returns tenant event and unique-event usage counts. |
 | `/metrics` | `GET` | Prometheus-style operational metrics. |
 | `/health` | `GET` | Health check. |
 
@@ -160,4 +199,4 @@ uvicorn app.main:app --reload
 
 ## Interview Pitch
 
-Hermes is a self-hosted webhook reliability layer. It accepts webhook events quickly, persists them in PostgreSQL, safely distributes delivery work across concurrent async workers using `SKIP LOCKED`, retries failed deliveries with exponential backoff, preserves dead-lettered events for inspection, and exposes replay, metrics, structured logs, and a dashboard for operations.
+Hermes is a self-hosted webhook reliability layer. It accepts webhook events quickly, verifies optional provider signatures, persists them in PostgreSQL, fans out events to multiple destinations, filters and reshapes payloads, safely distributes delivery work across concurrent async workers using `SKIP LOCKED`, retries failed deliveries with exponential backoff, preserves dead-lettered events for inspection, and exposes replay, usage metrics, structured logs, and a dashboard for operations.

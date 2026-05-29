@@ -91,6 +91,31 @@ def main() -> int:
         retry_detail = wait_for_status(client, failure_data["webhook_id"], {"pending", "failed"}, args.timeout, min_attempts=1)
         print_result("Failure/retry path", retry_detail)
 
+        fanout_key = f"demo-fanout-{uuid.uuid4()}"
+        transform = '{"id":"event.id","type":"event.type","amount":"event.amount"}'
+        fanout = client.post(
+            "/api/v1/ingest",
+            params=[
+                ("url", args.success_url),
+                ("urls", f"{args.success_url}?copy=analytics"),
+                ("filter", "event.type == 'payment.succeeded'"),
+                ("transform", transform),
+            ],
+            headers=request_headers(args.api_key, fanout_key),
+            json={"event": {"id": fanout_key, "type": "payment.succeeded", "amount": 2999}},
+        )
+        fanout.raise_for_status()
+        fanout_data = fanout.json()
+        print(f"Fan-out queued {len(fanout_data['webhook_ids'])} destination(s): {fanout_data['webhook_ids']}")
+
+        filtered = client.post(
+            "/api/v1/ingest",
+            params={"url": args.success_url, "filter": "event.type == 'payment.succeeded'"},
+            json={"event": {"id": f"demo-filter-{uuid.uuid4()}", "type": "payment.failed"}},
+        )
+        filtered.raise_for_status()
+        print(f"Filtered non-matching event: {filtered.json()['filtered']}")
+
         replay = client.post(f"/api/v1/webhooks/{failure_data['webhook_id']}/replay")
         replay.raise_for_status()
         print(f"Replay requested: {replay.json()['success']}")

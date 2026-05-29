@@ -43,9 +43,19 @@ async def init_db() -> None:
     """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(text("ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS tenant_id VARCHAR"))
+        await conn.execute(text("UPDATE webhooks SET tenant_id = 'anonymous' WHERE tenant_id IS NULL"))
+        await conn.execute(text("ALTER TABLE webhooks ALTER COLUMN tenant_id SET DEFAULT 'anonymous'"))
+        await conn.execute(text("ALTER TABLE webhooks ALTER COLUMN tenant_id SET NOT NULL"))
+        await conn.execute(text("ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS event_id VARCHAR"))
+        await conn.execute(text("UPDATE webhooks SET event_id = id::text WHERE event_id IS NULL"))
+        await conn.execute(text("ALTER TABLE webhooks ALTER COLUMN event_id SET NOT NULL"))
         await conn.execute(text("ALTER TABLE webhooks ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_webhooks_tenant_created_at ON webhooks (tenant_id, created_at)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_webhooks_event_id ON webhooks (event_id)"))
+        await conn.execute(text("DROP INDEX IF EXISTS ix_webhooks_destination_idempotency_key"))
         await conn.execute(text("""
-            CREATE UNIQUE INDEX IF NOT EXISTS ix_webhooks_destination_idempotency_key
-            ON webhooks (destination_url, idempotency_key)
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_webhooks_tenant_destination_idempotency_key
+            ON webhooks (tenant_id, destination_url, idempotency_key)
             WHERE idempotency_key IS NOT NULL
         """))

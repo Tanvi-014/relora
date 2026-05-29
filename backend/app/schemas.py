@@ -17,6 +17,8 @@ class DeliveryAttemptResponse(BaseModel):
 
 class WebhookResponse(BaseModel):
     id: UUID
+    tenant_id: str
+    event_id: str
     destination_url: str
     idempotency_key: Optional[str] = None
     status: str

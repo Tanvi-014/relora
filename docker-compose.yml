@@ -33,8 +33,13 @@ services:
       - BACKOFF_BASE_SECONDS=15 # Speed up retry backoff slightly in local compose development
       - HTTP_CLIENT_TIMEOUT_SECONDS=5
       - HERMES_API_KEY=
+      - HERMES_API_KEYS=
       - ALLOW_PRIVATE_DESTINATIONS=true
       - DESTINATION_HOST_ALLOWLIST=
+      - STRIPE_WEBHOOK_SECRET=
+      - GITHUB_WEBHOOK_SECRET=
+      - HERMES_WEBHOOK_SECRET=
+      - SIGNATURE_TOLERANCE_SECONDS=300
       - AUTO_CREATE_TABLES=true
     volumes:
       # Live reload volume mounts for seamless development loop

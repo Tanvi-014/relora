@@ -1,6 +1,7 @@
 import os
 import time
 import uuid
+from urllib.parse import quote
 
 import httpx
 import pytest
@@ -81,6 +82,17 @@ def test_metrics_endpoint_returns_prometheus_text():
     assert "hermes_delivery_attempts_total" in response.text
 
 
+def test_usage_endpoint_returns_tenant_counts():
+    with api_client() as client:
+        response = client.get("/api/v1/usage")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "usage" in data
+    assert len(data["usage"]) >= 1
+    assert {"tenant_id", "events", "unique_events"}.issubset(data["usage"][0].keys())
+
+
 def test_failed_delivery_records_attempt_and_schedules_retry():
     with api_client() as client:
         ingest_response = client.post(
@@ -104,3 +116,28 @@ def test_failed_delivery_records_attempt_and_schedules_retry():
         assert detail_data["retry_count"] >= 1
         assert detail_data["attempts"][0]["status_code"] == 500
         assert detail_data["attempts"][0]["error_message"] == "HTTP Error Status 500"
+
+
+def test_fanout_filter_and_transform_flow():
+    event_id = f"evt_{uuid.uuid4()}"
+    transform = '{"id":"event.id","type":"event.type","amount":"event.amount"}'
+    second_destination = f"{SUCCESS_URL}?copy=2"
+    destination_query = f"url={quote(SUCCESS_URL, safe='')}&urls={quote(second_destination, safe='')}"
+
+    with api_client() as client:
+        response = client.post(
+            f"/api/v1/ingest?{destination_query}&filter=event.type%20%3D%3D%20%27payment.succeeded%27&transform={quote(transform, safe='')}",
+            headers={"Idempotency-Key": f"fanout-{event_id}"},
+            json={"event": {"id": event_id, "type": "payment.succeeded", "amount": 2999}},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["event_id"] == event_id
+        assert len(data["webhook_ids"]) == 2
+
+        filtered = client.post(
+            f"/api/v1/ingest?url={SUCCESS_URL}&filter=event.type%20%3D%3D%20%27payment.succeeded%27",
+            json={"event": {"id": f"evt_{uuid.uuid4()}", "type": "payment.failed"}},
+        )
+        assert filtered.status_code == 200
+        assert filtered.json()["filtered"] is True

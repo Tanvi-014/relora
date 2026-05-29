@@ -12,16 +12,19 @@ PRIVATE_HOSTNAMES = {
 }
 
 
-async def require_api_key(request: Request) -> None:
-    if not settings.HERMES_API_KEY:
-        return
+async def require_api_key(request: Request) -> str:
+    tenants = settings.api_key_tenants
+    if not tenants:
+        return "anonymous"
 
     supplied_key = request.headers.get("X-Hermes-API-Key")
-    if supplied_key != settings.HERMES_API_KEY:
+    tenant_id = tenants.get(supplied_key or "")
+    if not tenant_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing or invalid Hermes API key",
         )
+    return tenant_id
 
 
 def validate_destination_url(url: str) -> str:

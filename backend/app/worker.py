@@ -75,7 +75,7 @@ class WebhookWorker:
                     FOR UPDATE SKIP LOCKED
                     LIMIT 1
                 )
-                RETURNING id, destination_url, payload, headers, retry_count, max_retries;
+                RETURNING id, tenant_id, event_id, destination_url, payload, headers, retry_count, max_retries;
             """)
             
             result = await session.execute(query)
@@ -84,7 +84,7 @@ class WebhookWorker:
             if not row:
                 return False
 
-            webhook_id, destination_url, payload, headers, retry_count, max_retries = row
+            webhook_id, tenant_id, event_id, destination_url, payload, headers, retry_count, max_retries = row
             
             logger.info(
                 "Worker claimed webhook.",
@@ -92,13 +92,15 @@ class WebhookWorker:
                     "event": "webhook.claimed",
                     "worker_id": self.worker_id,
                     "webhook_id": str(webhook_id),
+                    "tenant_id": tenant_id,
+                    "event_id": event_id,
                     "destination_url": destination_url,
                     "retry_count": retry_count,
                 },
             )
             
             # Perform delivery in an isolated try-except block so failure doesn't crash the worker
-            await self._deliver_webhook(session, client, webhook_id, destination_url, payload, headers, retry_count, max_retries)
+            await self._deliver_webhook(session, client, webhook_id, tenant_id, event_id, destination_url, payload, headers, retry_count, max_retries)
             return True
 
     async def _deliver_webhook(
@@ -106,6 +108,8 @@ class WebhookWorker:
         session: AsyncSession, 
         client: httpx.AsyncClient, 
         webhook_id, 
+        tenant_id: str,
+        event_id: str,
         destination_url: str, 
         payload, 
         headers, 
@@ -122,6 +126,7 @@ class WebhookWorker:
         # Inject Hermes headers for tracing and idempotency
         delivery_headers = {**headers}
         delivery_headers["X-Hermes-Delivery-Id"] = str(uuid_to_str(webhook_id))
+        delivery_headers["X-Hermes-Event-Id"] = event_id
         delivery_headers["X-Hermes-Attempt"] = str(attempt_number)
         
         try:
@@ -171,8 +176,11 @@ class WebhookWorker:
                     "event": "webhook.delivery.succeeded",
                     "worker_id": self.worker_id,
                     "webhook_id": str(webhook_id),
+                    "tenant_id": tenant_id,
+                    "event_id": event_id,
+                    "destination_url": destination_url,
                     "attempt_number": attempt_number,
-                    "status_code": status_code,
+                    "response_status": status_code,
                     "duration_ms": duration_ms,
                 },
             )
@@ -193,8 +201,11 @@ class WebhookWorker:
                     "event": "webhook.delivery.failed",
                     "worker_id": self.worker_id,
                     "webhook_id": str(webhook_id),
+                    "tenant_id": tenant_id,
+                    "event_id": event_id,
+                    "destination_url": destination_url,
                     "attempt_number": attempt_number,
-                    "status_code": status_code,
+                    "response_status": status_code,
                     "duration_ms": duration_ms,
                     "error_message": error_message,
                 },
@@ -210,6 +221,9 @@ class WebhookWorker:
                         "event": "webhook.retry.scheduled",
                         "worker_id": self.worker_id,
                         "webhook_id": str(webhook_id),
+                        "tenant_id": tenant_id,
+                        "event_id": event_id,
+                        "destination_url": destination_url,
                         "retry_count": new_retry_count,
                         "backoff_seconds": backoff_seconds,
                         "next_attempt_at": next_attempt.isoformat(),
@@ -238,6 +252,9 @@ class WebhookWorker:
                         "event": "webhook.dlq.created",
                         "worker_id": self.worker_id,
                         "webhook_id": str(webhook_id),
+                        "tenant_id": tenant_id,
+                        "event_id": event_id,
+                        "destination_url": destination_url,
                         "retry_count": new_retry_count,
                     },
                 )
