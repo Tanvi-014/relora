@@ -215,6 +215,25 @@ Currently auth is API-key based. Real SaaS needs login, projects, teams.
 
 ---
 
+## Phase 8 — Bug Fixes & Authentication Stability ✅
+
+**Status: SHIPPED & TESTED**
+**Date Completed: 2026-05-29**
+
+### What was fixed:
+- [x] **Missing require_api_key function** — Added missing function in auth.py for backward compatibility
+- [x] **Password hashing limitation** — Switched from bcrypt to argon2 to avoid 72-byte password limit
+- [x] **Frontend JSON parsing error** — Improved error handling to check content-type before parsing
+- [x] **Docker container issues** — Fixed PYTHONPATH and permission issues in Dockerfile
+
+### Files created/modified:
+- `backend/app/auth.py` — Added require_api_key function, switched to argon2
+- `backend/requirements.txt` — Changed from passlib[bcrypt] to passlib[argon2]
+- `frontend/auth.js` — Added content-type checking before JSON parsing
+- `backend/Dockerfile` — Fixed PYTHONPATH and permission issues
+
+---
+
 ## Changelog
 
 | Date | Phase | Change |
@@ -245,3 +264,7 @@ Currently auth is API-key based. Real SaaS needs login, projects, teams.
 | 2026-05-29 | 7 | Complete Stripe webhook integration guide with signature verification |
 | 2026-05-29 | 7 | Complete GitHub webhook integration guide with HMAC verification |
 | 2026-05-29 | 7 | Added Integrations section to README with quick examples |
+| 2026-05-29 | 8 | Fixed missing require_api_key function in auth.py for backward compatibility |
+| 2026-05-29 | 8 | Switched from bcrypt to argon2 for password hashing to avoid 72-byte limit |
+| 2026-05-29 | 8 | Improved frontend error handling with content-type checking before JSON parsing |
+| 2026-05-29 | 8 | Fixed Docker container PYTHONPATH and permission issues |
