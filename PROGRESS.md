@@ -4,6 +4,48 @@
 
 ---
 
+## Phase 9 — Production Architecture Upgrade (v2) ✅
+
+**Status: SHIPPED**
+**Date Completed: 2026-05-29**
+
+### What was built:
+
+| Feature | File | Status |
+|---------|------|--------|
+| Split API/Worker processes | `api_main.py`, `worker_main.py` | ✅ |
+| Postgres token-bucket rate limiter (multi-process safe) | `rate_limit.py` | ✅ |
+| FIFO ordering_key delivery (strict order per key) | `worker.py`, migration 0006 | ✅ |
+| WebSocket hub (real-time dashboard, no polling) | `websocket_hub.py` | ✅ |
+| Destinations registry with full CRUD + circuit breaker | `models.py`, `api_main.py` | ✅ |
+| Standard Webhooks signing (svix-compatible) | `standard_webhooks.py` | ✅ |
+| Adaptive retry (429→Retry-After, 4xx→no-retry, 503→long) | `retry_strategy.py` | ✅ |
+| Circuit breaker per destination | `circuit_breaker.py` | ✅ |
+| GIN full-text payload search | migration 0006 | ✅ |
+| Pull-based polling endpoints for firewall-blocked consumers | `api_main.py` | ✅ |
+| Time-window bulk replay with rate control | `api_main.py`, `models.py` | ✅ |
+| Claude-powered AI schema intelligence | `ai_intelligence.py` | ✅ |
+| Webhook simulator (Stripe/GitHub/Shopify templates) | `simulator.py` | ✅ |
+| Delivery SLA tracking (P50/P95/P99) | `api_main.py` | ✅ |
+| Event type / schema catalog | `models.py`, `api_main.py` | ✅ |
+| httpOnly cookie JWT (XSS-safe, no localStorage) | `auth.py`, `api_main.py` | ✅ |
+| DB connection pooling (pool_size=20, max_overflow=10) | `db.py` | ✅ |
+| Alembic migration 0006 for all new tables | `alembic/versions/` | ✅ |
+| World-class dark UI redesign (sidebar, real-time WS) | `frontend/` | ✅ |
+| Separated docker-compose (postgres/api/worker/migrate) | `docker-compose.yml` | ✅ |
+| Updated Dockerfile + requirements (websockets, anthropic) | `Dockerfile`, `requirements.txt` | ✅ |
+| Comprehensive test suite (retry, signing, circuit breaker, routing, simulator) | `tests/` | ✅ |
+| Updated `.env.example` with all v2 variables | `.env.example` | ✅ |
+| `main.py` backward-compat shim | `main.py` | ✅ |
+
+### Security fixes vs v1:
+- `AUTO_CREATE_TABLES` defaults to `false` (was `true`)
+- `ALLOW_PRIVATE_DESTINATIONS` defaults to `false` (was `true`)
+- JWT stored in httpOnly cookie, not localStorage (XSS protection)
+- Rate limiter is now Postgres-backed — works across multiple API replicas
+
+---
+
 ## Architecture Mindmap
 
 ```

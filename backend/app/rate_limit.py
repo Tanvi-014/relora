@@ -1,69 +1,68 @@
 """
-Simple in-memory rate limiting middleware for Hermes.
-Limits requests per tenant/IP per minute.
+Postgres-backed token bucket rate limiter.
+Works correctly across multiple API processes — no in-memory state.
 """
+import logging
+from fastapi import HTTPException, Request, status
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from collections import defaultdict
-from datetime import datetime, timedelta
-from typing import Dict, Tuple
-from fastapi import Request, HTTPException, status
 from app.config import settings
 
-
-class RateLimiter:
-    def __init__(self, requests_per_minute: int = 60):
-        self.requests_per_minute = requests_per_minute
-        # Store: (tenant_id, ip) -> list of timestamps
-        self.requests: Dict[Tuple[str, str], list] = defaultdict(list)
-    
-    def is_allowed(self, tenant_id: str, ip: str) -> bool:
-        key = (tenant_id, ip)
-        now = datetime.utcnow()
-        minute_ago = now - timedelta(minutes=1)
-        
-        # Clean old requests
-        self.requests[key] = [
-            ts for ts in self.requests[key] 
-            if ts > minute_ago
-        ]
-        
-        # Check if under limit
-        if len(self.requests[key]) >= self.requests_per_minute:
-            return False
-        
-        # Record this request
-        self.requests[key].append(now)
-        return True
-    
-    def cleanup(self):
-        """Clean up old entries periodically"""
-        now = datetime.utcnow()
-        minute_ago = now - timedelta(minutes=1)
-        
-        for key in list(self.requests.keys()):
-            self.requests[key] = [
-                ts for ts in self.requests[key] 
-                if ts > minute_ago
-            ]
-            if not self.requests[key]:
-                del self.requests[key]
+logger = logging.getLogger("hermes.rate_limit")
 
 
-# Global rate limiter instance
-rate_limiter = RateLimiter(settings.RATE_LIMIT_PER_MINUTE)
+async def check_rate_limit(
+    request: Request,
+    tenant_id: str,
+    db: AsyncSession,
+) -> None:
+    max_per_minute = settings.RATE_LIMIT_PER_MINUTE
+    max_tokens = float(max_per_minute)
+    refill_rate = max_tokens / 60.0  # tokens per second
 
-
-async def check_rate_limit(request: Request, tenant_id: str):
-    """
-    Dependency to check rate limits per tenant/IP.
-    """
-    # Get client IP (considering proxies)
-    ip = request.headers.get("X-Forwarded-For", request.client.host)
-    if ip:
-        ip = ip.split(",")[0].strip()  # Take first IP if multiple
-    
-    if not rate_limiter.is_allowed(tenant_id, ip):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Rate limit exceeded. Maximum {settings.RATE_LIMIT_PER_MINUTE} requests per minute."
+    # Key: prefer tenant_id (if real tenant), else fall back to IP
+    if tenant_id and tenant_id != "anonymous":
+        key = f"tenant:{tenant_id}"
+    else:
+        forwarded = request.headers.get("X-Forwarded-For", "")
+        ip = forwarded.split(",")[0].strip() if forwarded else (
+            request.client.host if request.client else "unknown"
         )
+        key = f"ip:{ip}"
+
+    bucket_key = f"rl:{key}"
+
+    try:
+        result = await db.execute(
+            text("""
+            INSERT INTO rate_limit_buckets (key, tokens, last_refill, max_tokens, refill_rate)
+            VALUES (:key, :max_tokens - 1, NOW(), :max_tokens, :refill_rate)
+            ON CONFLICT (key) DO UPDATE SET
+              tokens = LEAST(
+                rate_limit_buckets.max_tokens,
+                rate_limit_buckets.tokens +
+                  EXTRACT(EPOCH FROM (NOW() - rate_limit_buckets.last_refill)) * rate_limit_buckets.refill_rate
+              ) - 1,
+              last_refill = NOW()
+            WHERE (
+              rate_limit_buckets.tokens +
+              EXTRACT(EPOCH FROM (NOW() - rate_limit_buckets.last_refill)) * rate_limit_buckets.refill_rate
+            ) >= 1
+            RETURNING tokens
+            """),
+            {"key": bucket_key, "max_tokens": max_tokens, "refill_rate": refill_rate},
+        )
+        await db.commit()
+        row = result.fetchone()
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Rate limit exceeded. Max {max_per_minute} requests/minute.",
+                headers={"Retry-After": "60"},
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Rate limiter failure must not block requests
+        logger.warning("Rate limiter DB error, allowing request through: %s", exc)

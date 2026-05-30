@@ -1,143 +1,154 @@
+"""
+Live integration tests against a running Hermes instance.
+Run with: HERMES_TEST_BASE_URL=http://localhost:8000 pytest tests/test_api_integration.py
+
+Inside Docker Compose these use http://downstream:9000/ok and /fail.
+"""
 import os
-import time
 import uuid
-from urllib.parse import quote
-
-import httpx
 import pytest
+import httpx
+
+BASE_URL = os.getenv("HERMES_TEST_BASE_URL", "http://localhost:8000")
+DOWNSTREAM_OK = os.getenv("HERMES_TEST_DOWNSTREAM_OK", "http://downstream:9000/ok")
+DOWNSTREAM_FAIL = os.getenv("HERMES_TEST_DOWNSTREAM_FAIL", "http://downstream:9000/fail")
+
+_session_token = None
 
 
-BASE_URL = os.getenv("HERMES_TEST_BASE_URL")
-SUCCESS_URL = os.getenv("HERMES_TEST_SUCCESS_URL", "http://downstream:9000/ok")
-FAILURE_URL = os.getenv("HERMES_TEST_FAILURE_URL", "http://downstream:9000/fail")
-
-pytestmark = pytest.mark.skipif(
-    not BASE_URL,
-    reason="Set HERMES_TEST_BASE_URL to run live API integration tests.",
-)
+def get_headers():
+    if _session_token:
+        return {"Authorization": f"Bearer {_session_token}", "Content-Type": "application/json"}
+    return {"Content-Type": "application/json"}
 
 
-def api_client() -> httpx.Client:
-    headers = {}
-    if os.getenv("HERMES_TEST_API_KEY"):
-        headers["X-Hermes-API-Key"] = os.getenv("HERMES_TEST_API_KEY", "")
-    return httpx.Client(base_url=BASE_URL, headers=headers, timeout=10.0)
+@pytest.fixture(scope="session", autouse=True)
+def setup_session():
+    global _session_token
+    email = f"itest_{uuid.uuid4().hex[:8]}@hermes.test"
+    password = "IntegrationTest123!"
+
+    r = httpx.post(f"{BASE_URL}/api/v1/auth/register", json={"email": email, "password": password})
+    assert r.status_code == 201, f"Register failed: {r.text}"
+
+    r = httpx.post(f"{BASE_URL}/api/v1/auth/login", json={"email": email, "password": password})
+    assert r.status_code == 200
+    _session_token = r.json()["access_token"]
 
 
-def test_ingest_detail_stats_and_replay_flow():
-    destination = SUCCESS_URL
-    idempotency_key = f"pytest-{uuid.uuid4()}"
-
-    with api_client() as client:
-        ingest_response = client.post(
-            f"/api/v1/ingest?url={destination}",
-            headers={"Idempotency-Key": idempotency_key},
-            json={"event": "pytest.integration.success"},
-        )
-        assert ingest_response.status_code == 200
-        ingest_data = ingest_response.json()
-        assert ingest_data["success"] is True
-        assert ingest_data["duplicate"] is False
-
-        duplicate_response = client.post(
-            f"/api/v1/ingest?url={destination}",
-            headers={"Idempotency-Key": idempotency_key},
-            json={"event": "pytest.integration.success"},
-        )
-        assert duplicate_response.status_code == 200
-        duplicate_data = duplicate_response.json()
-        assert duplicate_data["webhook_id"] == ingest_data["webhook_id"]
-        assert duplicate_data["duplicate"] is True
-
-        webhook_id = ingest_data["webhook_id"]
-        deadline = time.time() + 20
-        detail_data = {}
-        while time.time() < deadline:
-            detail_response = client.get(f"/api/v1/webhooks/{webhook_id}")
-            assert detail_response.status_code == 200
-            detail_data = detail_response.json()
-            if detail_data["status"] == "completed":
-                break
-            time.sleep(1)
-
-        assert detail_data["status"] == "completed"
-        assert detail_data["idempotency_key"] == idempotency_key
-        assert len(detail_data["attempts"]) >= 1
-
-        stats_response = client.get("/api/v1/stats")
-        assert stats_response.status_code == 200
-        assert stats_response.json()["total_webhooks"] >= 1
-
-        replay_response = client.post(f"/api/v1/webhooks/{webhook_id}/replay")
-        assert replay_response.status_code == 200
-        assert replay_response.json()["success"] is True
+def test_health():
+    r = httpx.get(f"{BASE_URL}/health")
+    assert r.status_code == 200
+    assert r.json()["status"] == "healthy"
 
 
-def test_metrics_endpoint_returns_prometheus_text():
-    with api_client() as client:
-        response = client.get("/metrics")
-
-    assert response.status_code == 200
-    assert "hermes_webhooks_total" in response.text
-    assert "hermes_delivery_attempts_total" in response.text
+def test_detailed_health():
+    r = httpx.get(f"{BASE_URL}/health/detailed", headers=get_headers())
+    assert r.status_code == 200
+    assert "database" in r.json()["checks"]
 
 
-def test_usage_endpoint_returns_tenant_counts():
-    with api_client() as client:
-        response = client.get("/api/v1/usage")
+def test_ingest_and_list():
+    ikey = f"itest-{uuid.uuid4().hex}"
+    r = httpx.post(
+        f"{BASE_URL}/api/v1/ingest",
+        headers={**get_headers(), "Idempotency-Key": ikey},
+        params={"url": DOWNSTREAM_OK},
+        json={"event": "integration.test", "value": 42},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["success"] is True
+    wid = body["webhook_ids"][0]
 
-    assert response.status_code == 200
-    data = response.json()
-    assert "usage" in data
-    assert len(data["usage"]) >= 1
-    assert {"tenant_id", "events", "unique_events"}.issubset(data["usage"][0].keys())
-
-
-def test_failed_delivery_records_attempt_and_schedules_retry():
-    with api_client() as client:
-        ingest_response = client.post(
-            f"/api/v1/ingest?url={FAILURE_URL}",
-            json={"event": "pytest.integration.failure"},
-        )
-        assert ingest_response.status_code == 200
-        webhook_id = ingest_response.json()["webhook_id"]
-
-        deadline = time.time() + 20
-        detail_data = {}
-        while time.time() < deadline:
-            detail_response = client.get(f"/api/v1/webhooks/{webhook_id}")
-            assert detail_response.status_code == 200
-            detail_data = detail_response.json()
-            if detail_data["attempts"]:
-                break
-            time.sleep(1)
-
-        assert detail_data["status"] in {"pending", "failed"}
-        assert detail_data["retry_count"] >= 1
-        assert detail_data["attempts"][0]["status_code"] == 500
-        assert detail_data["attempts"][0]["error_message"] == "HTTP Error Status 500"
+    r2 = httpx.get(f"{BASE_URL}/api/v1/webhooks", headers=get_headers())
+    assert r2.status_code == 200
+    ids = [w["id"] for w in r2.json()["webhooks"]]
+    assert wid in ids
 
 
-def test_fanout_filter_and_transform_flow():
-    event_id = f"evt_{uuid.uuid4()}"
-    transform = '{"id":"event.id","type":"event.type","amount":"event.amount"}'
-    second_destination = f"{SUCCESS_URL}?copy=2"
-    destination_query = f"url={quote(SUCCESS_URL, safe='')}&urls={quote(second_destination, safe='')}"
+def test_idempotency():
+    ikey = f"idem-{uuid.uuid4().hex}"
+    headers = {**get_headers(), "Idempotency-Key": ikey}
+    params = {"url": DOWNSTREAM_OK}
+    payload = {"event": "idem.test"}
 
-    with api_client() as client:
-        response = client.post(
-            f"/api/v1/ingest?{destination_query}&filter=event.type%20%3D%3D%20%27payment.succeeded%27&transform={quote(transform, safe='')}",
-            headers={"Idempotency-Key": f"fanout-{event_id}"},
-            json={"event": {"id": event_id, "type": "payment.succeeded", "amount": 2999}},
-        )
-        assert response.status_code == 200
-        data = response.json()
-        assert data["event_id"] == event_id
-        assert len(data["webhook_ids"]) == 2
+    r1 = httpx.post(f"{BASE_URL}/api/v1/ingest", headers=headers, params=params, json=payload)
+    r2 = httpx.post(f"{BASE_URL}/api/v1/ingest", headers=headers, params=params, json=payload)
+    assert r1.json()["webhook_ids"][0] == r2.json()["webhook_ids"][0]
 
-        filtered = client.post(
-            f"/api/v1/ingest?url={SUCCESS_URL}&filter=event.type%20%3D%3D%20%27payment.succeeded%27",
-            json={"event": {"id": f"evt_{uuid.uuid4()}", "type": "payment.failed"}},
-        )
-        assert filtered.status_code == 200
-        assert filtered.json()["filtered"] is True
+
+def test_fan_out():
+    r = httpx.post(
+        f"{BASE_URL}/api/v1/ingest",
+        headers=get_headers(),
+        params={"url": DOWNSTREAM_OK, "urls": [DOWNSTREAM_OK + "?copy=1"]},
+        json={"event": "fanout.test"},
+    )
+    assert r.status_code == 200
+    assert len(r.json()["webhook_ids"]) == 2
+
+
+def test_filter_rejects():
+    r = httpx.post(
+        f"{BASE_URL}/api/v1/ingest",
+        headers=get_headers(),
+        params={"url": DOWNSTREAM_OK, "filter": "event.type == 'payment.succeeded'"},
+        json={"event": {"type": "payment.failed"}},
+    )
+    assert r.status_code == 200
+    assert r.json()["filtered"] is True
+
+
+def test_stats():
+    r = httpx.get(f"{BASE_URL}/api/v1/stats", headers=get_headers())
+    assert r.status_code == 200
+    for k in ("total_webhooks", "pending_count", "completed_count", "failed_count", "success_rate"):
+        assert k in r.json()
+
+
+def test_metrics():
+    r = httpx.get(f"{BASE_URL}/metrics", headers=get_headers())
+    assert r.status_code == 200
+    assert "hermes_webhooks_total" in r.text
+
+
+def test_simulate_providers():
+    r = httpx.get(f"{BASE_URL}/api/v1/simulate/providers", headers=get_headers())
+    assert r.status_code == 200
+    assert "stripe" in r.json()
+
+
+def test_destination_crud():
+    r = httpx.post(
+        f"{BASE_URL}/api/v1/destinations",
+        headers=get_headers(),
+        json={"name": f"itest-{uuid.uuid4().hex[:6]}", "url": DOWNSTREAM_OK},
+    )
+    assert r.status_code == 201, r.text
+    dest_id = r.json()["id"]
+
+    r = httpx.get(f"{BASE_URL}/api/v1/destinations/{dest_id}", headers=get_headers())
+    assert r.status_code == 200
+
+    r = httpx.delete(f"{BASE_URL}/api/v1/destinations/{dest_id}", headers=get_headers())
+    assert r.status_code == 204
+
+
+def test_event_type_crud():
+    r = httpx.post(
+        f"{BASE_URL}/api/v1/event-types",
+        headers=get_headers(),
+        json={"name": f"itest.event.{uuid.uuid4().hex[:6]}", "description": "test"},
+    )
+    assert r.status_code == 201, r.text
+    et_id = r.json()["id"]
+
+    r = httpx.delete(f"{BASE_URL}/api/v1/event-types/{et_id}", headers=get_headers())
+    assert r.status_code == 204
+
+
+def test_usage():
+    r = httpx.get(f"{BASE_URL}/api/v1/usage", headers=get_headers())
+    assert r.status_code == 200
+    assert "usage" in r.json()

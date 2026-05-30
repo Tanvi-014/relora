@@ -1,38 +1,71 @@
 import enum
-from datetime import datetime, timezone
 import uuid
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Text, Index, Boolean
+from datetime import datetime, timezone
+
+from sqlalchemy import (
+    Boolean, Column, DateTime, Float, ForeignKey,
+    Index, Integer, String, Text, UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
 
+
+def _now():
+    return datetime.now(timezone.utc)
+
+
 class WebhookStatus(str, enum.Enum):
     PENDING = "pending"
     PROCESSING = "processing"
     COMPLETED = "completed"
-    FAILED = "failed"  # Dead Letter Queue
+    FAILED = "failed"
+
+
+class CircuitState(str, enum.Enum):
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+
+# ---------------------------------------------------------------------------
+# Core webhook tables
+# ---------------------------------------------------------------------------
 
 class Webhook(Base):
     __tablename__ = "webhooks"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(String, nullable=False, default="anonymous")
+    tenant_id = Column(String, nullable=False, default="anonymous", index=True)
     event_id = Column(String, nullable=False, default=lambda: str(uuid.uuid4()))
     destination_url = Column(String, nullable=False)
+    destination_id = Column(UUID(as_uuid=True), ForeignKey("destinations.id", ondelete="SET NULL"), nullable=True)
     payload = Column(JSONB, nullable=False)
     headers = Column(JSONB, nullable=False)
     idempotency_key = Column(String, nullable=True)
+    ordering_key = Column(String, nullable=True)
     status = Column(String, nullable=False, default=WebhookStatus.PENDING.value)
     retry_count = Column(Integer, nullable=False, default=0)
     max_retries = Column(Integer, nullable=False, default=5)
-    
-    next_attempt_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
-    last_attempt_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    is_simulation = Column(Boolean, nullable=False, default=False)
 
-    attempts = relationship("DeliveryAttempt", back_populates="webhook", cascade="all, delete-orphan", lazy="selectin")
+    # Consumer polling fields
+    consumer_id = Column(String, nullable=True)
+    poll_ack_token = Column(String, nullable=True)
+
+    next_attempt_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+    last_attempt_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+    attempts = relationship(
+        "DeliveryAttempt",
+        back_populates="webhook",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    destination = relationship("Destination", back_populates="webhooks", lazy="select")
 
     def to_dict(self):
         return {
@@ -40,12 +73,13 @@ class Webhook(Base):
             "tenant_id": self.tenant_id,
             "event_id": self.event_id,
             "destination_url": self.destination_url,
-            "payload": self.payload,
-            "headers": self.headers,
+            "destination_id": str(self.destination_id) if self.destination_id else None,
             "idempotency_key": self.idempotency_key,
+            "ordering_key": self.ordering_key,
             "status": self.status,
             "retry_count": self.retry_count,
             "max_retries": self.max_retries,
+            "is_simulation": self.is_simulation,
             "next_attempt_at": self.next_attempt_at.isoformat() if self.next_attempt_at else None,
             "last_attempt_at": self.last_attempt_at.isoformat() if self.last_attempt_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -57,8 +91,15 @@ class Webhook(Base):
         Index("ix_webhooks_created_at", "created_at"),
         Index("ix_webhooks_tenant_created_at", "tenant_id", "created_at"),
         Index("ix_webhooks_event_id", "event_id"),
-        Index("ix_webhooks_tenant_destination_idempotency_key", "tenant_id", "destination_url", "idempotency_key", unique=True),
+        Index("ix_webhooks_ordering_key", "ordering_key"),
+        Index(
+            "ix_webhooks_tenant_destination_idempotency_key",
+            "tenant_id", "destination_url", "idempotency_key",
+            unique=True,
+            postgresql_where="idempotency_key IS NOT NULL",
+        ),
     )
+
 
 class DeliveryAttempt(Base):
     __tablename__ = "delivery_attempts"
@@ -68,9 +109,11 @@ class DeliveryAttempt(Base):
     attempt_number = Column(Integer, nullable=False)
     status_code = Column(Integer, nullable=True)
     response_body = Column(Text, nullable=True)
+    response_headers = Column(JSONB, nullable=True)
     duration_ms = Column(Integer, nullable=True)
     error_message = Column(Text, nullable=True)
-    attempted_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    retry_strategy_used = Column(String, nullable=True)
+    attempted_at = Column(DateTime(timezone=True), nullable=False, default=_now)
 
     webhook = relationship("Webhook", back_populates="attempts")
 
@@ -83,6 +126,7 @@ class DeliveryAttempt(Base):
             "response_body": self.response_body,
             "duration_ms": self.duration_ms,
             "error_message": self.error_message,
+            "retry_strategy_used": self.retry_strategy_used,
             "attempted_at": self.attempted_at.isoformat() if self.attempted_at else None,
         }
 
@@ -91,39 +135,92 @@ class DeliveryAttempt(Base):
     )
 
 
-class AlertChannelType(str, enum.Enum):
-    SLACK = "slack"
-    EMAIL = "email"
+# ---------------------------------------------------------------------------
+# Destinations registry
+# ---------------------------------------------------------------------------
 
+class Destination(Base):
+    __tablename__ = "destinations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(255), nullable=False)
+    url = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    is_enabled = Column(Boolean, nullable=False, default=True)
+    max_retries = Column(Integer, nullable=False, default=5)
+    backoff_base_seconds = Column(Integer, nullable=False, default=30)
+    ordering_key_field = Column(String(255), nullable=True)
+    transform_type = Column(String(20), nullable=False, default="none")  # none | json_map | javascript
+    transform_code = Column(Text, nullable=True)
+    transform_map = Column(JSONB, nullable=True)
+    filter_expression = Column(Text, nullable=True)
+    webhook_secret = Column(Text, nullable=True)
+    custom_headers = Column(JSONB, nullable=False, default=dict)
+
+    # Circuit breaker
+    circuit_state = Column(String(20), nullable=False, default=CircuitState.CLOSED.value)
+    circuit_failure_count = Column(Integer, nullable=False, default=0)
+    circuit_opened_at = Column(DateTime(timezone=True), nullable=True)
+    circuit_next_retry_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+    project = relationship("Project", back_populates="destinations")
+    webhooks = relationship("Webhook", back_populates="destination", lazy="select")
+
+    def to_dict(self):
+        return {
+            "id": str(self.id),
+            "project_id": str(self.project_id),
+            "name": self.name,
+            "url": self.url,
+            "description": self.description,
+            "is_enabled": self.is_enabled,
+            "max_retries": self.max_retries,
+            "backoff_base_seconds": self.backoff_base_seconds,
+            "ordering_key_field": self.ordering_key_field,
+            "transform_type": self.transform_type,
+            "filter_expression": self.filter_expression,
+            "custom_headers": self.custom_headers or {},
+            "circuit_state": self.circuit_state,
+            "circuit_failure_count": self.circuit_failure_count,
+            "circuit_opened_at": self.circuit_opened_at.isoformat() if self.circuit_opened_at else None,
+            "circuit_next_retry_at": self.circuit_next_retry_at.isoformat() if self.circuit_next_retry_at else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "name", name="uq_destinations_project_name"),
+        Index("ix_destinations_project_id", "project_id"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Alert configuration
+# ---------------------------------------------------------------------------
 
 class AlertConfig(Base):
-    """
-    Stores alert destinations per tenant. When a webhook enters the DLQ,
-    Hermes fires notifications to every enabled AlertConfig for that tenant.
-    """
     __tablename__ = "alert_configs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(String, nullable=False, default="anonymous")
-    name = Column(String, nullable=False)  # Human-readable label, e.g. "#ops-alerts"
-    channel_type = Column(String, nullable=False)  # "slack" or "email"
+    name = Column(String, nullable=False)
+    channel_type = Column(String, nullable=False)  # slack | email
     config = Column(JSONB, nullable=False)
-    # Slack config:  {"webhook_url": "https://hooks.slack.com/services/..."}
-    # Email config:  {"smtp_host": "...", "smtp_port": 587, "username": "...", "password": "...", "from": "...", "to": "dev@company.com"}
     enabled = Column(Boolean, nullable=False, default=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
 
     def to_dict(self):
-        # Redact sensitive fields in config before sending to frontend
         safe_config = {**self.config} if self.config else {}
-        for sensitive_key in ("password", "smtp_password"):
-            if sensitive_key in safe_config:
-                safe_config[sensitive_key] = "••••••••"
-        # Show only last 20 chars of webhook URLs
+        for k in ("password", "smtp_password"):
+            if k in safe_config:
+                safe_config[k] = "••••••••"
         if "webhook_url" in safe_config and len(safe_config["webhook_url"]) > 20:
             safe_config["webhook_url"] = "…" + safe_config["webhook_url"][-20:]
-
         return {
             "id": str(self.id),
             "tenant_id": self.tenant_id,
@@ -140,13 +237,17 @@ class AlertConfig(Base):
     )
 
 
+# ---------------------------------------------------------------------------
+# SaaS user / project / team models
+# ---------------------------------------------------------------------------
+
 class User(Base):
     __tablename__ = "users"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email = Column(String, unique=True, nullable=False)
     password_hash = Column(String, nullable=False)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
 
     memberships = relationship("ProjectMember", back_populates="user", cascade="all, delete-orphan")
 
@@ -154,7 +255,7 @@ class User(Base):
         return {
             "id": str(self.id),
             "email": self.email,
-            "created_at": self.created_at.isoformat() if self.created_at else None
+            "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
 
@@ -164,16 +265,19 @@ class Project(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String, nullable=False)
     api_key = Column(String, unique=True, nullable=False, default=lambda: f"hk_live_{uuid.uuid4().hex}")
-    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
 
     members = relationship("ProjectMember", back_populates="project", cascade="all, delete-orphan")
+    destinations = relationship("Destination", back_populates="project", cascade="all, delete-orphan")
+    event_types = relationship("EventType", back_populates="project", cascade="all, delete-orphan")
+    replay_jobs = relationship("ReplayJob", back_populates="project", cascade="all, delete-orphan")
 
     def to_dict(self):
         return {
             "id": str(self.id),
             "name": self.name,
             "api_key": self.api_key,
-            "created_at": self.created_at.isoformat() if self.created_at else None
+            "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
 
@@ -182,8 +286,8 @@ class ProjectMember(Base):
 
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    role = Column(String, nullable=False, default="viewer")  # "owner", "admin", "viewer"
-    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    role = Column(String, nullable=False, default="viewer")  # owner | admin | viewer
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
 
     user = relationship("User", back_populates="memberships")
     project = relationship("Project", back_populates="members")
@@ -194,6 +298,96 @@ class ProjectMember(Base):
             "user_id": str(self.user_id),
             "role": self.role,
             "email": self.user.email if self.user else None,
-            "created_at": self.created_at.isoformat() if self.created_at else None
+            "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
+
+# ---------------------------------------------------------------------------
+# Rate limit buckets (Postgres token bucket — multi-process safe)
+# ---------------------------------------------------------------------------
+
+class RateLimitBucket(Base):
+    __tablename__ = "rate_limit_buckets"
+
+    key = Column(String(255), primary_key=True)
+    tokens = Column(Float, nullable=False, default=60.0)
+    last_refill = Column(DateTime(timezone=True), nullable=False, default=_now)
+    max_tokens = Column(Float, nullable=False, default=60.0)
+    refill_rate = Column(Float, nullable=False, default=1.0)  # tokens/second
+
+
+# ---------------------------------------------------------------------------
+# Event type catalog
+# ---------------------------------------------------------------------------
+
+class EventType(Base):
+    __tablename__ = "event_types"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    schema = Column(JSONB, nullable=True)
+    example_payload = Column(JSONB, nullable=True)
+    version = Column(String(50), nullable=False, default="1")
+    deprecated = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+
+    project = relationship("Project", back_populates="event_types")
+
+    def to_dict(self):
+        return {
+            "id": str(self.id),
+            "project_id": str(self.project_id),
+            "name": self.name,
+            "description": self.description,
+            "schema": self.schema,
+            "example_payload": self.example_payload,
+            "version": self.version,
+            "deprecated": self.deprecated,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "name", "version", name="uq_event_types_project_name_version"),
+        Index("ix_event_types_project_id", "project_id"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Bulk replay jobs
+# ---------------------------------------------------------------------------
+
+class ReplayJob(Base):
+    __tablename__ = "replay_jobs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    from_time = Column(DateTime(timezone=True), nullable=False)
+    to_time = Column(DateTime(timezone=True), nullable=False)
+    destination_id = Column(UUID(as_uuid=True), nullable=True)
+    replay_rate_per_minute = Column(Integer, nullable=False, default=100)
+    status = Column(String(20), nullable=False, default="pending")  # pending | running | completed | failed
+    total_count = Column(Integer, nullable=False, default=0)
+    processed_count = Column(Integer, nullable=False, default=0)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+    project = relationship("Project", back_populates="replay_jobs")
+
+    def to_dict(self):
+        return {
+            "id": str(self.id),
+            "project_id": str(self.project_id),
+            "from_time": self.from_time.isoformat() if self.from_time else None,
+            "to_time": self.to_time.isoformat() if self.to_time else None,
+            "destination_id": str(self.destination_id) if self.destination_id else None,
+            "replay_rate_per_minute": self.replay_rate_per_minute,
+            "status": self.status,
+            "total_count": self.total_count,
+            "processed_count": self.processed_count,
+            "error_message": self.error_message,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }

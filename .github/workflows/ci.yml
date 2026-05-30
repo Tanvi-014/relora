@@ -12,6 +12,30 @@ jobs:
       run:
         working-directory: backend
 
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: hermes
+          POSTGRES_PASSWORD: hermesdev
+          POSTGRES_DB: hermes
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://hermes:hermesdev@localhost:5432/hermes
+      SYNC_DATABASE_URL: postgresql://hermes:hermesdev@localhost:5432/hermes
+      ENVIRONMENT: development
+      AUTO_CREATE_TABLES: "true"
+      ALLOW_PRIVATE_DESTINATIONS: "true"
+      JWT_SECRET: ci-test-secret-not-for-production
+      PYTHONPATH: /home/runner/work/Hermes/Hermes/backend
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,5 +48,27 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
-      - name: Run tests
-        run: python -m pytest
+      - name: Run unit tests
+        run: python -m pytest tests/test_retry_strategy.py tests/test_standard_webhooks.py tests/test_routing.py tests/test_simulator.py tests/test_circuit_breaker.py tests/test_security.py tests/test_alerts.py tests/test_worker.py -v
+
+      - name: Run migrations
+        run: alembic upgrade head
+
+      - name: Start Hermes API (background)
+        run: |
+          uvicorn app.api_main:app --host 0.0.0.0 --port 8000 &
+          sleep 5
+        env:
+          AUTO_CREATE_TABLES: "false"
+
+      - name: Start fake downstream (background)
+        run: |
+          uvicorn scripts.fake_downstream:app --host 0.0.0.0 --port 9000 &
+          sleep 2
+
+      - name: Run integration tests
+        run: python -m pytest tests/test_api_integration.py -v
+        env:
+          HERMES_TEST_BASE_URL: http://localhost:8000
+          HERMES_TEST_DOWNSTREAM_OK: http://localhost:9000/ok
+          HERMES_TEST_DOWNSTREAM_FAIL: http://localhost:9000/fail

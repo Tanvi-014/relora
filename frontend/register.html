@@ -1,50 +1,38 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Register - Hermes Webhook Console</title>
-    <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hermes — Register</title>
+  <link rel="stylesheet" href="style.css">
 </head>
-<body class="login-page">
-
-    <div class="login-container">
-        <div class="login-card">
-            <div class="login-header">
-                <div class="logo-container">
-                    <span class="logo-text">Hermes</span>
-                    <span class="logo-badge">v1.0.0</span>
-                </div>
-                <h1 class="login-title">Create account</h1>
-                <p class="login-subtitle">Get started with Hermes webhook console</p>
-            </div>
-
-            <form id="register-form" class="login-form">
-                <div class="form-group">
-                    <label for="email">Email</label>
-                    <input type="email" id="email" name="email" placeholder="you@example.com" required>
-                </div>
-                <div class="form-group">
-                    <label for="password">Password</label>
-                    <input type="password" id="password" name="password" placeholder="••••••••" required minlength="8">
-                </div>
-                <div class="form-group">
-                    <label for="confirm-password">Confirm Password</label>
-                    <input type="password" id="confirm-password" name="confirm-password" placeholder="••••••••" required minlength="8">
-                </div>
-                <div id="register-error" class="error-message" style="display: none;"></div>
-                <button type="submit" class="btn btn-primary btn-full" id="register-btn">
-                    <span class="btn-text">Create Account</span>
-                    <span class="btn-spinner" style="display: none;">Creating account...</span>
-                </button>
-            </form>
-
-            <div class="login-footer">
-                <p>Already have an account? <a href="login.html" class="link">Sign In</a></p>
-            </div>
-        </div>
+<body>
+<div class="auth-page">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <div style="font-size:32px;margin-bottom:8px">⚡</div>
+      <div class="auth-logo-text">Hermes</div>
+      <div class="auth-logo-sub">Webhook Delivery Middleware</div>
     </div>
-
-    <script src="auth.js"></script>
+    <div class="auth-form-title">Create an account</div>
+    <div class="auth-form-sub">Start delivering webhooks reliably.</div>
+    <form id="register-form" onsubmit="handleRegister(event)">
+      <div class="input-group">
+        <label class="input-label">Email</label>
+        <input class="input" type="email" id="email" placeholder="you@company.com" required autofocus>
+      </div>
+      <div class="input-group">
+        <label class="input-label">Password</label>
+        <input class="input" type="password" id="password" placeholder="Min 8 characters" required minlength="8">
+      </div>
+      <div id="register-error" style="color:var(--danger);font-size:13px;margin-bottom:12px;display:none"></div>
+      <button type="submit" class="btn btn-primary" style="width:100%;padding:10px" id="register-btn">Create account</button>
+    </form>
+    <div class="auth-footer">
+      Already have an account? <a href="/login.html">Sign in</a>
+    </div>
+  </div>
+</div>
+<script src="auth.js"></script>
 </body>
 </html>

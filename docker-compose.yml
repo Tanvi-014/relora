@@ -1,66 +1,128 @@
 services:
-  db:
-    image: postgres:15-alpine
-    container_name: hermes-db
+  postgres:
+    image: postgres:16-alpine
+    container_name: hermes-postgres
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: hermes
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hermesdev}
       POSTGRES_DB: hermes
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5435:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d hermes"]
+      test: ["CMD-SHELL", "pg_isready -U hermes -d hermes"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
 
-  hermes:
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: hermes-nginx
+    ports:
+      - "8080:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      hermes-api:
+        condition: service_healthy
+
+  hermes-migrate:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    container_name: hermes-app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    container_name: hermes-migrate
+    command: sh -c "cd /app/backend && alembic upgrade head"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://hermes:${POSTGRES_PASSWORD:-hermesdev}@postgres:5432/hermes
+      SYNC_DATABASE_URL: postgresql://hermes:${POSTGRES_PASSWORD:-hermesdev}@postgres:5432/hermes
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  hermes-api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: hermes-api
+    command: uvicorn app.api_main:app --host 0.0.0.0 --port 8000
+    environment:
+      DATABASE_URL: postgresql+asyncpg://hermes:${POSTGRES_PASSWORD:-hermesdev}@postgres:5432/hermes
+      SYNC_DATABASE_URL: postgresql://hermes:${POSTGRES_PASSWORD:-hermesdev}@postgres:5432/hermes
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      AUTO_CREATE_TABLES: "false"
+      ALLOW_PRIVATE_DESTINATIONS: ${ALLOW_PRIVATE_DESTINATIONS:-false}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-10}
+      DEFAULT_MAX_RETRIES: ${DEFAULT_MAX_RETRIES:-5}
+      BACKOFF_BASE_SECONDS: ${BACKOFF_BASE_SECONDS:-30}
+      HTTP_CLIENT_TIMEOUT_SECONDS: ${HTTP_CLIENT_TIMEOUT_SECONDS:-10}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-60}
+      JWT_SECRET: ${JWT_SECRET:-change-in-production}
+      HERMES_API_KEY: ${HERMES_API_KEY:-}
+      HERMES_API_KEYS: ${HERMES_API_KEYS:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      HERMES_WEBHOOK_SECRET: ${HERMES_WEBHOOK_SECRET:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ENABLE_AI_FEATURES: ${ENABLE_AI_FEATURES:-false}
+      ENABLE_SIMULATOR: "true"
+      FORCE_HTTPS: "false"
+      COOKIE_SECURE: "false"
+    volumes:
+      - ./backend:/workspace/backend:ro
+      - ./frontend:/workspace/frontend:ro
+    depends_on:
+      hermes-migrate:
+        condition: service_completed_successfully
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  hermes-worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: hermes-worker
+    command: python -m app.worker_main
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/hermes
-      - SYNC_DATABASE_URL=postgresql://postgres:postgres@db:5432/hermes
-      - WORKER_CONCURRENCY=5
-      - WORKER_POLL_INTERVAL_SECONDS=1
-      - DEFAULT_MAX_RETRIES=5
-      - BACKOFF_BASE_SECONDS=15 # Speed up retry backoff slightly in local compose development
-      - HTTP_CLIENT_TIMEOUT_SECONDS=5
-      - HERMES_API_KEY=
-      - HERMES_API_KEYS=
-      - ALLOW_PRIVATE_DESTINATIONS=true
-      - DESTINATION_HOST_ALLOWLIST=
-      - STRIPE_WEBHOOK_SECRET=
-      - GITHUB_WEBHOOK_SECRET=
-      - HERMES_WEBHOOK_SECRET=
-      - SIGNATURE_TOLERANCE_SECONDS=300
-      - AUTO_CREATE_TABLES=true
-    volumes:
-      # Live reload volume mounts for seamless development loop
-      - ./backend:/workspace/backend
-      - ./frontend:/workspace/frontend
+      DATABASE_URL: postgresql+asyncpg://hermes:${POSTGRES_PASSWORD:-hermesdev}@postgres:5432/hermes
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-10}
+      WORKER_POLL_INTERVAL_SECONDS: "1"
+      DEFAULT_MAX_RETRIES: ${DEFAULT_MAX_RETRIES:-5}
+      BACKOFF_BASE_SECONDS: ${BACKOFF_BASE_SECONDS:-30}
+      HTTP_CLIENT_TIMEOUT_SECONDS: ${HTTP_CLIENT_TIMEOUT_SECONDS:-10}
+      ALLOW_PRIVATE_DESTINATIONS: ${ALLOW_PRIVATE_DESTINATIONS:-false}
+      STANDARD_WEBHOOKS_SECRET: ${STANDARD_WEBHOOKS_SECRET:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ENABLE_AI_FEATURES: ${ENABLE_AI_FEATURES:-false}
     depends_on:
-      db:
-        condition: service_healthy
-      downstream:
-        condition: service_started
+      hermes-migrate:
+        condition: service_completed_successfully
 
   downstream:
     build:
       context: .
       dockerfile: backend/Dockerfile
     container_name: hermes-downstream
-    command: uvicorn scripts.fake_downstream:app --host 0.0.0.0 --port 9000 --reload
+    command: uvicorn scripts.fake_downstream:app --host 0.0.0.0 --port 9000
+    environment:
+      DATABASE_URL: postgresql+asyncpg://hermes:${POSTGRES_PASSWORD:-hermesdev}@postgres:5432/hermes
+    volumes:
+      - ./backend:/workspace/backend:ro
     ports:
       - "9000:9000"
-    volumes:
-      - ./backend:/workspace/backend
 
 volumes:
   postgres_data:

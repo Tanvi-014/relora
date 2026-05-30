@@ -1,336 +1,545 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hermes Webhook Console</title>
-    <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hermes — Webhook Delivery</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div id="app">
+  <!-- Header -->
+  <header class="header">
+    <a class="header-logo" href="#">
+      <div class="logo-icon">⚡</div>
+      Hermes
+    </a>
 
-    <!-- Header Section -->
-    <header>
-        <div class="logo-container">
-            <span class="logo-text">Hermes</span>
-            <span class="logo-badge">v1.0.0</span>
+    <div class="header-spacer"></div>
+
+    <!-- WS status -->
+    <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text3)">
+      <div class="ws-dot connecting" id="ws-dot"></div>
+      <span id="ws-status-text">Connecting…</span>
+    </div>
+
+    <!-- Project switcher -->
+    <div class="project-switcher" id="ps-trigger">
+      <span style="font-size:13px">📁</span>
+      <span class="ps-name" id="ps-name">Loading…</span>
+      <span class="ps-arrow">▼</span>
+      <div class="ps-dropdown" id="ps-dropdown">
+        <div id="ps-list"></div>
+        <div class="ps-separator"></div>
+        <div class="ps-item" onclick="openNewProjectModal()">
+          <span>+</span> New Project
         </div>
-        <div class="header-actions">
-            <div class="project-switcher" id="project-switcher">
-                <select id="project-select" class="project-select">
-                    <option value="">Loading projects...</option>
+      </div>
+    </div>
+
+    <!-- User menu -->
+    <div class="user-menu" id="user-menu-trigger">
+      <div class="user-avatar" id="user-initial">?</div>
+      <span style="font-size:13px;font-weight:500" id="user-email-short">…</span>
+      <div class="user-dropdown" id="user-dropdown">
+        <div class="user-dropdown-item" id="user-email-full" style="color:var(--text3);font-size:12px;cursor:default"></div>
+        <div class="ps-separator"></div>
+        <div class="user-dropdown-item danger" onclick="logout()">Sign out</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Body -->
+  <div class="main-body">
+    <!-- Sidebar -->
+    <nav class="sidebar">
+      <div class="nav-section"><span class="nav-section-label">Observe</span></div>
+      <div class="nav-item active" data-page="overview" onclick="navTo('overview')">
+        <span class="nav-icon">📊</span> Overview
+      </div>
+      <div class="nav-item" data-page="webhooks" onclick="navTo('webhooks')">
+        <span class="nav-icon">📨</span> Webhooks
+        <span class="nav-badge hidden" id="failed-badge">0</span>
+      </div>
+
+      <div class="nav-section"><span class="nav-section-label">Configure</span></div>
+      <div class="nav-item" data-page="destinations" onclick="navTo('destinations')">
+        <span class="nav-icon">🎯</span> Destinations
+      </div>
+      <div class="nav-item" data-page="event-types" onclick="navTo('event-types')">
+        <span class="nav-icon">📋</span> Event Types
+      </div>
+      <div class="nav-item" data-page="alerts" onclick="navTo('alerts')">
+        <span class="nav-icon">🔔</span> Alerts
+      </div>
+
+      <div class="nav-section"><span class="nav-section-label">Tools</span></div>
+      <div class="nav-item" data-page="analytics" onclick="navTo('analytics')">
+        <span class="nav-icon">📈</span> Analytics
+      </div>
+      <div class="nav-item" data-page="simulate" onclick="navTo('simulate')">
+        <span class="nav-icon">🧪</span> Simulate
+      </div>
+      <div class="nav-item" data-page="replay" onclick="navTo('replay')">
+        <span class="nav-icon">🔁</span> Bulk Replay
+      </div>
+      <div class="nav-item" data-page="ai" onclick="navTo('ai')">
+        <span class="nav-icon">🤖</span> AI Tools
+      </div>
+
+      <div class="nav-section"><span class="nav-section-label">Account</span></div>
+      <div class="nav-item" data-page="team" onclick="navTo('team')">
+        <span class="nav-icon">👥</span> Team
+      </div>
+      <div class="nav-item" data-page="settings" onclick="navTo('settings')">
+        <span class="nav-icon">⚙️</span> Settings
+      </div>
+    </nav>
+
+    <!-- Content + Detail panel -->
+    <div style="display:flex;flex:1;overflow:hidden">
+      <div class="content" id="content-area">
+
+        <!-- ── Overview page ── -->
+        <div class="page active" id="page-overview">
+          <div class="page-title">Overview</div>
+          <div class="page-subtitle">Real-time webhook delivery status</div>
+          <div class="stats-grid">
+            <div class="stat-card"><div class="stat-label">Total</div><div class="stat-value" id="stat-total">—</div></div>
+            <div class="stat-card"><div class="stat-label">Pending</div><div class="stat-value pending" id="stat-pending">—</div></div>
+            <div class="stat-card"><div class="stat-label">Processing</div><div class="stat-value processing" id="stat-processing">—</div></div>
+            <div class="stat-card"><div class="stat-label">Completed</div><div class="stat-value completed" id="stat-completed">—</div></div>
+            <div class="stat-card"><div class="stat-label">Failed (DLQ)</div><div class="stat-value failed" id="stat-failed">—</div></div>
+            <div class="stat-card"><div class="stat-label">Success Rate</div><div class="stat-value rate" id="stat-rate">—</div></div>
+          </div>
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">Recent Webhooks</div>
+              <button class="btn btn-sm btn-ghost" onclick="navTo('webhooks')">View all →</button>
+            </div>
+            <div id="overview-table-wrap"></div>
+          </div>
+        </div>
+
+        <!-- ── Webhooks page ── -->
+        <div class="page" id="page-webhooks">
+          <div class="page-title">Webhooks</div>
+          <div class="page-subtitle">All ingested webhook events and their delivery status</div>
+          <div class="table-wrap">
+            <div class="table-toolbar">
+              <div class="search-input">
+                <input class="input" id="wh-search" placeholder="Search payload content…" oninput="debounceSearch()">
+              </div>
+              <select class="select" style="width:150px" id="wh-status-filter" onchange="loadWebhooks(1)">
+                <option value="">All statuses</option>
+                <option value="pending">Pending</option>
+                <option value="processing">Processing</option>
+                <option value="completed">Completed</option>
+                <option value="failed">Failed</option>
+              </select>
+              <select class="select" style="width:180px" id="wh-dest-filter" onchange="loadWebhooks(1)">
+                <option value="">All destinations</option>
+              </select>
+              <button class="btn btn-secondary btn-sm" onclick="loadWebhooks(1)">↻ Refresh</button>
+            </div>
+            <div id="webhooks-table-body">
+              <div class="empty-state"><div class="icon">📭</div><div class="title">No webhooks yet</div><div class="desc">Ingest a webhook to get started</div></div>
+            </div>
+            <div class="pagination" id="wh-pagination"></div>
+          </div>
+        </div>
+
+        <!-- ── Destinations page ── -->
+        <div class="page" id="page-destinations">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
+            <div>
+              <div class="page-title">Destinations</div>
+              <div class="page-subtitle" style="margin-bottom:0">Registered delivery endpoints</div>
+            </div>
+            <button class="btn btn-primary" onclick="openDestModal()">+ New Destination</button>
+          </div>
+          <div class="dest-grid" id="dest-grid">
+            <div class="empty-state"><div class="icon">🎯</div><div class="title">No destinations yet</div><div class="desc">Create a destination to start routing webhooks</div></div>
+          </div>
+        </div>
+
+        <!-- ── Event Types page ── -->
+        <div class="page" id="page-event-types">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
+            <div>
+              <div class="page-title">Event Types</div>
+              <div class="page-subtitle" style="margin-bottom:0">Schema catalog for your webhook events</div>
+            </div>
+            <button class="btn btn-primary" onclick="openEventTypeModal()">+ New Event Type</button>
+          </div>
+          <div id="event-types-list"></div>
+        </div>
+
+        <!-- ── Alerts page ── -->
+        <div class="page" id="page-alerts">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
+            <div>
+              <div class="page-title">Alerts</div>
+              <div class="page-subtitle" style="margin-bottom:0">Get notified when webhooks hit the dead letter queue</div>
+            </div>
+            <button class="btn btn-primary" onclick="openAlertModal()">+ New Alert</button>
+          </div>
+          <div id="alerts-list"></div>
+        </div>
+
+        <!-- ── Simulate page ── -->
+        <div class="page" id="page-simulate">
+          <div class="page-title">Simulate</div>
+          <div class="page-subtitle">Fire realistic fake events from known providers</div>
+          <div style="display:grid;grid-template-columns:360px 1fr;gap:20px">
+            <div class="card">
+              <div class="card-title" style="margin-bottom:16px">Event Builder</div>
+              <div class="input-group">
+                <label class="input-label">Provider</label>
+                <select class="select" id="sim-provider" onchange="loadSimEventTypes()">
+                  <option value="stripe">Stripe</option>
+                  <option value="github">GitHub</option>
+                  <option value="shopify">Shopify</option>
                 </select>
+              </div>
+              <div class="input-group">
+                <label class="input-label">Event Type</label>
+                <select class="select" id="sim-event-type"></select>
+              </div>
+              <div class="input-group">
+                <label class="input-label">Destination</label>
+                <select class="select" id="sim-destination">
+                  <option value="">Select destination…</option>
+                </select>
+              </div>
+              <div style="margin-top:4px">
+                <button class="btn btn-primary" style="width:100%" onclick="fireSimulation()">⚡ Fire Webhook</button>
+              </div>
             </div>
-            <div class="status-indicator">
-                <span class="status-dot"></span>
-                <span>Active worker pool connected</span>
+            <div class="card">
+              <div class="card-title" style="margin-bottom:16px">Result</div>
+              <div id="sim-result" style="color:var(--text3);font-size:13px">Fire a webhook to see the result here.</div>
             </div>
-            <button class="btn btn-secondary btn-sm" id="logout-btn">Logout</button>
-        </div>
-    </header>
-
-    <!-- Main Workspace -->
-    <main>
-        
-        <!-- Sidebar filters -->
-        <div class="sidebar">
-            <h3 class="sidebar-title">Status Filter</h3>
-            <button class="filter-btn active" data-status="all">
-                <span>All Webhooks</span>
-                <span class="badge-count" id="count-all">0</span>
-            </button>
-            <button class="filter-btn" data-status="pending">
-                <span>Pending</span>
-                <span class="badge-count" id="count-pending">0</span>
-            </button>
-            <button class="filter-btn" data-status="processing">
-                <span>Processing</span>
-                <span class="badge-count" id="count-processing">0</span>
-            </button>
-            <button class="filter-btn" data-status="completed">
-                <span>Completed</span>
-                <span class="badge-count" id="count-completed">0</span>
-            </button>
-            <button class="filter-btn" data-status="failed">
-                <span>Failed (DLQ)</span>
-                <span class="badge-count" id="count-failed">0</span>
-            </button>
-            <div class="sidebar-divider"></div>
-            <h3 class="sidebar-title">Configuration</h3>
-            <button class="nav-btn" id="nav-projects-btn">
-                <span>Projects</span>
-            </button>
-            <button class="nav-btn" id="nav-alerts-btn">
-                <span>Alert Settings</span>
-            </button>
+          </div>
         </div>
 
-        <!-- Dashboard content area -->
-        <div class="dashboard-content">
-            
-            <!-- Aggregated Metric Cards -->
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <span class="stat-label">Total Ingested</span>
-                    <span class="stat-value" id="stat-total">0</span>
-                </div>
-                <div class="stat-card">
-                    <span class="stat-label">Active Queue</span>
-                    <span class="stat-value" id="stat-active">0</span>
-                </div>
-                <div class="stat-card">
-                    <span class="stat-label">Success Rate</span>
-                    <span class="stat-value" id="stat-success">100.0%</span>
-                </div>
-                <div class="stat-card">
-                    <span class="stat-label" style="color: var(--color-rose);">Dead Letter Queue</span>
-                    <span class="stat-value" id="stat-failed" style="color: var(--color-rose);">0</span>
-                </div>
-            </div>
-
-            <!-- Ingestion Search Bar -->
-            <div class="search-container">
-                <input type="text" id="search-input" class="search-input" placeholder="Search by Destination URL...">
-                <button class="btn btn-secondary" id="refresh-btn">Refresh</button>
-            </div>
-
-            <!-- Webhook Data Table -->
-            <div class="table-section">
-                <table id="webhooks-table">
-                    <thead>
-                        <tr>
-                            <th style="width: 80px;">Status</th>
-                            <th>Destination URL</th>
-                            <th style="width: 90px; text-align: right;">Attempts</th>
-                            <th style="width: 170px;">Last Delivery Attempt</th>
-                            <th style="width: 170px;">Created At</th>
-                        </tr>
-                    </thead>
-                    <tbody id="webhooks-tbody">
-                        <!-- Filled by Javascript dynamically -->
-                    </tbody>
-                </table>
-            </div>
+        <!-- ── Analytics / SLA page ── -->
+        <div class="page" id="page-analytics">
+          <div class="page-title">Analytics</div>
+          <div class="page-subtitle">Delivery SLA — P50 / P95 / P99 latency per destination, last 7 days</div>
+          <div id="analytics-content">
+            <div class="empty-state"><div class="icon">📈</div><div class="title">Loading…</div></div>
+          </div>
         </div>
 
-        <!-- Projects Settings Area (Hidden by default) -->
-        <div class="projects-settings-content" id="projects-settings-content" style="display: none;">
-            <div class="settings-header">
-                <div>
-                    <h1 class="settings-title">Projects</h1>
-                    <p class="settings-subtitle">Manage your projects and team members.</p>
-                </div>
-                <button class="btn btn-secondary" id="back-to-console-from-projects-btn">
-                    &larr; Back to Console
-                </button>
+        <!-- ── AI Tools page ── -->
+        <div class="page" id="page-ai">
+          <div class="page-title">AI Tools</div>
+          <div class="page-subtitle">Claude-powered payload analysis, filter suggestions, and transform generation</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+            <!-- Analyze panel -->
+            <div class="card">
+              <div class="card-title" style="margin-bottom:4px">Analyze Payload</div>
+              <div style="font-size:12px;color:var(--text3);margin-bottom:16px">Paste any webhook payload — Claude detects the provider, event type, and suggests filters &amp; field mappings.</div>
+              <div class="input-group">
+                <label class="input-label">Payload JSON</label>
+                <textarea class="textarea" id="ai-payload" rows="10" placeholder='{"type":"payment_intent.succeeded","data":{"object":{"id":"pi_abc","amount":4999}}}'></textarea>
+              </div>
+              <button class="btn btn-primary" style="width:100%" onclick="aiAnalyze()">🤖 Analyze with Claude</button>
             </div>
-
-            <div class="settings-grid">
-                <!-- Left Column: Create Project -->
-                <div class="settings-card">
-                    <h3 class="card-title">Create New Project</h3>
-                    <form id="create-project-form" class="alert-form">
-                        <div class="form-group">
-                            <label for="project-name">Project Name</label>
-                            <input type="text" id="project-name" placeholder="e.g. Production Webhooks" required>
-                        </div>
-                        <button type="submit" class="btn btn-primary">Create Project</button>
-                    </form>
-                </div>
-
-                <!-- Right Column: Projects List -->
-                <div class="settings-card">
-                    <h3 class="card-title">Your Projects</h3>
-                    <div class="projects-list" id="projects-list">
-                        <!-- Loaded dynamically -->
-                        <div class="empty-state">Loading projects...</div>
-                    </div>
-                </div>
+            <!-- Result panel -->
+            <div class="card">
+              <div class="card-title" style="margin-bottom:16px">Analysis Result</div>
+              <div id="ai-result" style="color:var(--text3);font-size:13px">Run an analysis to see results here.</div>
             </div>
+          </div>
 
-            <!-- Team Members Section -->
-            <div class="settings-card" id="team-members-card" style="display: none;">
-                <div class="configured-card-header">
-                    <h3 class="card-title">Team Members</h3>
-                    <span class="mono" id="team-project-name" style="color: var(--text-secondary);"></span>
-                </div>
-                
-                <!-- Add Member Form -->
-                <form id="add-member-form" class="alert-form" style="margin-bottom: 20px;">
-                    <div class="form-grid">
-                        <div class="form-group">
-                            <label for="member-email">Email</label>
-                            <input type="email" id="member-email" placeholder="colleague@example.com" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="member-role">Role</label>
-                            <select id="member-role" required>
-                                <option value="viewer">Viewer</option>
-                                <option value="admin">Admin</option>
-                                <option value="owner">Owner</option>
-                            </select>
-                        </div>
-                    </div>
-                    <button type="submit" class="btn btn-primary">Add Member</button>
-                </form>
-
-                <div class="team-members-list" id="team-members-list">
-                    <!-- Loaded dynamically -->
-                    <div class="empty-state">Select a project to view team members.</div>
-                </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px">
+            <!-- Suggest filter -->
+            <div class="card">
+              <div class="card-title" style="margin-bottom:4px">Suggest Filter</div>
+              <div style="font-size:12px;color:var(--text3);margin-bottom:16px">Describe in plain English what events you want — Claude returns the filter expression.</div>
+              <div class="input-group">
+                <label class="input-label">Sample Payload JSON</label>
+                <textarea class="textarea" id="ai-filter-payload" rows="5" placeholder='{"type":"payment.succeeded","data":{"amount":4999}}'></textarea>
+              </div>
+              <div class="input-group">
+                <label class="input-label">What do you want to filter?</label>
+                <input class="input" id="ai-filter-desc" placeholder="Only successful payments over $100">
+              </div>
+              <button class="btn btn-primary" style="width:100%" onclick="aiSuggestFilter()">🤖 Generate Filter</button>
+              <div id="ai-filter-result" style="margin-top:12px"></div>
             </div>
-        </div>
+            <!-- Suggest transform -->
+            <div class="card">
+              <div class="card-title" style="margin-bottom:4px">Suggest Transform</div>
+              <div style="font-size:12px;color:var(--text3);margin-bottom:16px">Describe the shape you need — Claude writes the JavaScript transform function.</div>
+              <div class="input-group">
+                <label class="input-label">Sample Payload JSON</label>
+                <textarea class="textarea" id="ai-transform-payload" rows="5" placeholder='{"type":"payment.succeeded","data":{"object":{"id":"pi_abc","amount":4999}}}'></textarea>
+              </div>
+              <div class="input-group">
+                <label class="input-label">Describe the output shape</label>
+                <input class="input" id="ai-transform-desc" placeholder="Give me just the id and amount in cents">
+              </div>
+              <button class="btn btn-primary" style="width:100%" onclick="aiSuggestTransform()">🤖 Generate Transform</button>
+              <div id="ai-transform-result" style="margin-top:12px"></div>
             </div>
+          </div>
         </div>
 
-        <!-- Alerts Settings Area (Hidden by default) -->
-        <div class="alerts-settings-content" id="alerts-settings-content" style="display: none;">
-            <div class="settings-header">
-                <div>
-                    <h1 class="settings-title">Alert Settings</h1>
-                    <p class="settings-subtitle">Configure notification channels to alert your team when webhooks enter the Dead Letter Queue (DLQ).</p>
-                </div>
-                <button class="btn btn-secondary" id="back-to-console-btn">
-                    &larr; Back to Console
-                </button>
+        <!-- ── Bulk Replay page ── -->
+        <div class="page" id="page-replay">
+          <div class="page-title">Bulk Replay</div>
+          <div class="page-subtitle">Re-queue all webhooks from a time window — essential for post-incident recovery</div>
+          <div style="display:grid;grid-template-columns:400px 1fr;gap:20px">
+            <div class="card">
+              <div class="card-title" style="margin-bottom:16px">Replay Window</div>
+              <div class="input-group">
+                <label class="input-label">From</label>
+                <input class="input" type="datetime-local" id="replay-from">
+              </div>
+              <div class="input-group">
+                <label class="input-label">To</label>
+                <input class="input" type="datetime-local" id="replay-to">
+              </div>
+              <div class="input-group">
+                <label class="input-label">Destination (optional)</label>
+                <select class="select" id="replay-dest">
+                  <option value="">All destinations</option>
+                </select>
+              </div>
+              <div class="input-group">
+                <label class="input-label">Rate (events/minute)</label>
+                <input class="input" type="number" id="replay-rate" value="100" min="1" max="1000">
+              </div>
+              <button class="btn btn-primary" style="width:100%" onclick="startBulkReplay()">🔁 Start Replay</button>
             </div>
-
-            <div class="settings-grid">
-                <!-- Left Column: Add New Channel -->
-                <div class="settings-card">
-                    <h3 class="card-title">Add Alert Destination</h3>
-                    
-                    <!-- Channel Type Selector Tabs -->
-                    <div class="channel-tabs">
-                        <button class="channel-tab-btn active" data-channel="slack">Slack Webhook</button>
-                        <button class="channel-tab-btn" data-channel="email">Email (SMTP)</button>
-                    </div>
-
-                    <!-- Slack Form -->
-                    <form id="slack-alert-form" class="alert-form active">
-                        <div class="form-group">
-                            <label for="slack-name">Destination Name</label>
-                            <input type="text" id="slack-name" placeholder="e.g. #ops-alerts" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="slack-webhook-url">Slack Webhook URL</label>
-                            <input type="url" id="slack-webhook-url" placeholder="https://hooks.slack.com/services/..." required>
-                        </div>
-                        <button type="submit" class="btn btn-primary">Save Destination</button>
-                    </form>
-
-                    <!-- Email Form -->
-                    <form id="email-alert-form" class="alert-form">
-                        <div class="form-group">
-                            <label for="email-name">Destination Name</label>
-                            <input type="text" id="email-name" placeholder="e.g. Team Inbox" required>
-                        </div>
-                        <div class="form-grid">
-                            <div class="form-group">
-                                <label for="email-smtp-host">SMTP Host</label>
-                                <input type="text" id="email-smtp-host" placeholder="smtp.mailgun.org" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="email-smtp-port">SMTP Port</label>
-                                <input type="number" id="email-smtp-port" placeholder="587" value="587" required>
-                            </div>
-                        </div>
-                        <div class="form-grid">
-                            <div class="form-group">
-                                <label for="email-from">From Email</label>
-                                <input type="email" id="email-from" placeholder="hermes@company.com" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="email-to">To Email</label>
-                                <input type="email" id="email-to" placeholder="alerts@company.com" required>
-                            </div>
-                        </div>
-                        <div class="form-grid">
-                            <div class="form-group">
-                                <label for="email-username">SMTP User (Optional)</label>
-                                <input type="text" id="email-username" placeholder="postmaster@domain.com">
-                            </div>
-                            <div class="form-group">
-                                <label for="email-password">SMTP Password (Optional)</label>
-                                <input type="password" id="email-password" placeholder="••••••••">
-                            </div>
-                        </div>
-                        <div class="form-checkbox-group">
-                            <input type="checkbox" id="email-use-tls" checked>
-                            <label for="email-use-tls">Use Secure TLS / STARTTLS</label>
-                        </div>
-                        <button type="submit" class="btn btn-primary">Save Destination</button>
-                    </form>
-                </div>
-
-                <!-- Right Column: Configured Channels -->
-                <div class="settings-card">
-                    <h3 class="card-title">Configured Destinations</h3>
-                    <div class="configured-channels-list" id="configured-channels-list">
-                        <!-- Loaded dynamically -->
-                        <div class="empty-state">No alert destinations configured yet. Configure one on the left to start receiving alerts.</div>
-                    </div>
-                </div>
+            <div class="card">
+              <div class="card-title" style="margin-bottom:16px">Recent Replay Jobs</div>
+              <div id="replay-jobs-list" style="color:var(--text3);font-size:13px">No replay jobs yet.</div>
             </div>
+          </div>
         </div>
 
-        <!-- Details split panel inspector (Hidden by default) -->
-        <div class="inspector-panel" id="inspector-panel">
-            <div class="inspector-header">
-                <h2 class="inspector-title">Inspect Webhook</h2>
-                <button class="inspector-close" id="inspector-close-btn">&times;</button>
+        <!-- ── Team page ── -->
+        <div class="page" id="page-team">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
+            <div>
+              <div class="page-title">Team</div>
+              <div class="page-subtitle" style="margin-bottom:0">Manage project members and roles</div>
             </div>
-            
-            <div class="inspector-body">
-                <!-- Action Controls -->
-                <div class="inspect-section" style="flex-direction: row; gap: 12px;" id="inspect-actions">
-                    <!-- Loaded dynamically, e.g. Manual Replay Button -->
-                </div>
-
-                <!-- Webhook Meta Info -->
-                <div class="inspect-section">
-                    <h4 class="inspect-section-title">Delivery Details</h4>
-                    <div class="metadata-grid">
-                        <span class="metadata-label">ID</span>
-                        <span class="metadata-value mono" id="inspect-id">-</span>
-
-                        <span class="metadata-label">Status</span>
-                        <span class="metadata-value" id="inspect-status">-</span>
-
-                        <span class="metadata-label">Destination</span>
-                        <span class="metadata-value mono" id="inspect-url" style="word-break: break-all;">-</span>
-
-                        <span class="metadata-label">Attempts</span>
-                        <span class="metadata-value" id="inspect-attempts">-</span>
-
-                        <span class="metadata-label">Next Attempt At</span>
-                        <span class="metadata-value mono" id="inspect-next-attempt">-</span>
-                    </div>
-                </div>
-
-                <!-- Request Headers -->
-                <div class="inspect-section">
-                    <h4 class="inspect-section-title">Request Headers</h4>
-                    <pre><code id="inspect-headers">{}</code></pre>
-                </div>
-
-                <!-- Request Body -->
-                <div class="inspect-section">
-                    <h4 class="inspect-section-title">Request Payload</h4>
-                    <pre><code id="inspect-payload">{}</code></pre>
-                </div>
-
-                <!-- History of attempts -->
-                <div class="inspect-section">
-                    <h4 class="inspect-section-title">Execution Attempts Log</h4>
-                    <div class="attempts-list" id="inspect-attempts-list">
-                        <!-- Populated by JS -->
-                    </div>
-                </div>
-            </div>
+            <button class="btn btn-primary" onclick="openInviteModal()">+ Invite Member</button>
+          </div>
+          <div class="card">
+            <div id="team-list"></div>
+          </div>
         </div>
 
-    </main>
+        <!-- ── Settings page ── -->
+        <div class="page" id="page-settings">
+          <div class="page-title">Settings</div>
+          <div class="page-subtitle">Project configuration and API keys</div>
+          <div class="card" style="max-width:560px">
+            <div class="card-title" style="margin-bottom:16px">Project API Key</div>
+            <div style="display:flex;gap:8px">
+              <input class="input" id="settings-api-key" readonly>
+              <button class="btn btn-secondary btn-sm" onclick="copyApiKey()">Copy</button>
+            </div>
+            <div style="font-size:12px;color:var(--text3);margin-top:8px">Use this key as <span class="inline-code">X-Hermes-API-Key</span> header or Bearer token.</div>
+          </div>
+        </div>
 
-    <script src="app.js"></script>
+      </div><!-- /content -->
+
+      <!-- ── Detail panel ── -->
+      <div class="detail-panel hidden" id="detail-panel">
+        <div class="panel-header">
+          <div>
+            <div style="font-size:13px;font-weight:600" id="panel-webhook-id">—</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px" id="panel-created-at">—</div>
+          </div>
+          <span class="panel-close" onclick="closePanel()">✕</span>
+        </div>
+        <div class="panel-body">
+          <div class="panel-section">
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+              <span id="panel-status-badge"></span>
+              <button class="btn btn-xs btn-secondary" id="panel-replay-btn" onclick="replaySelected()">↻ Replay</button>
+            </div>
+            <div class="kv-list">
+              <div class="kv-row"><span class="kv-key">Destination</span><span class="kv-val" id="panel-dest-url"></span></div>
+              <div class="kv-row"><span class="kv-key">Event ID</span><span class="kv-val" id="panel-event-id"></span></div>
+              <div class="kv-row"><span class="kv-key">Tenant</span><span class="kv-val" id="panel-tenant-id"></span></div>
+              <div class="kv-row"><span class="kv-key">Retries</span><span class="kv-val" id="panel-retries"></span></div>
+              <div class="kv-row"><span class="kv-key">Idempotency Key</span><span class="kv-val" id="panel-idempotency"></span></div>
+              <div class="kv-row"><span class="kv-key">Ordering Key</span><span class="kv-val" id="panel-ordering-key"></span></div>
+            </div>
+          </div>
+
+          <div class="panel-section">
+            <div class="panel-section-title">Payload</div>
+            <div class="json-view" id="panel-payload"></div>
+          </div>
+
+          <div class="panel-section">
+            <div class="panel-section-title">Delivery Attempts</div>
+            <div class="timeline" id="panel-timeline"></div>
+          </div>
+
+          <div class="panel-section">
+            <div class="panel-section-title">Inbound Headers</div>
+            <div class="json-view" id="panel-headers"></div>
+          </div>
+        </div>
+      </div>
+    </div><!-- /content+panel -->
+  </div><!-- /main-body -->
+</div><!-- /app -->
+
+<!-- ── Toast container ── -->
+<div id="toast-container"></div>
+
+<!-- ── Modals ── -->
+
+<!-- New Project modal -->
+<div class="modal-overlay" id="modal-new-project">
+  <div class="modal">
+    <div class="modal-header"><div class="modal-title">New Project</div><span class="panel-close" onclick="closeModal('modal-new-project')">✕</span></div>
+    <div class="modal-body">
+      <div class="input-group"><label class="input-label">Project Name</label><input class="input" id="new-project-name" placeholder="My App"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-new-project')">Cancel</button>
+      <button class="btn btn-primary" onclick="createProject()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- New Destination modal -->
+<div class="modal-overlay" id="modal-dest">
+  <div class="modal" style="max-width:680px">
+    <div class="modal-header"><div class="modal-title" id="dest-modal-title">New Destination</div><span class="panel-close" onclick="closeModal('modal-dest')">✕</span></div>
+    <div class="modal-body">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="input-group" style="grid-column:1/-1"><label class="input-label">Name *</label><input class="input" id="dest-name" placeholder="My App Webhook"></div>
+        <div class="input-group" style="grid-column:1/-1"><label class="input-label">URL *</label><input class="input" id="dest-url" placeholder="https://myapp.com/webhooks"></div>
+        <div class="input-group"><label class="input-label">Max Retries</label><input class="input" type="number" id="dest-max-retries" value="5"></div>
+        <div class="input-group"><label class="input-label">Backoff Base (seconds)</label><input class="input" type="number" id="dest-backoff" value="30"></div>
+        <div class="input-group" style="grid-column:1/-1"><label class="input-label">Filter Expression</label><input class="input" id="dest-filter" placeholder="event.type == 'payment.succeeded'"></div>
+        <div class="input-group" style="grid-column:1/-1"><label class="input-label">Ordering Key Field (dot-path)</label><input class="input" id="dest-ordering-key" placeholder="data.customer_id"></div>
+        <div class="input-group" style="grid-column:1/-1"><label class="input-label">Webhook Secret (Standard Webhooks signing)</label><input class="input" id="dest-secret" placeholder="whsec_… or leave blank"></div>
+        <div class="input-group" style="grid-column:1/-1">
+          <label class="input-label">Transform Type</label>
+          <select class="select" id="dest-transform-type" onchange="toggleTransformEditor()">
+            <option value="none">None — deliver payload as-is</option>
+            <option value="json_map">JSON Field Map — rename/pick fields</option>
+            <option value="javascript">JavaScript — full transform function</option>
+          </select>
+        </div>
+        <div id="dest-transform-json-wrap" style="display:none;grid-column:1/-1">
+          <div class="input-group">
+            <label class="input-label">Field Map JSON <span style="color:var(--text3);font-weight:400">({"output_field": "source.path"})</span></label>
+            <textarea class="textarea code-editor" id="dest-transform-map" rows="5" placeholder='{"order_id": "data.object.id", "amount": "data.object.amount"}'></textarea>
+          </div>
+        </div>
+        <div id="dest-transform-js-wrap" style="display:none;grid-column:1/-1">
+          <div class="input-group">
+            <label class="input-label">JavaScript Transform <span style="color:var(--text3);font-weight:400">(receives <code>payload</code>, must return object)</span></label>
+            <textarea class="textarea code-editor" id="dest-transform-code" rows="8" placeholder="// Example: pick and rename fields&#10;return {&#10;  order_id: payload.data.object.id,&#10;  amount_cents: payload.data.object.amount,&#10;  customer: payload.data.object.customer&#10;};"></textarea>
+          </div>
+          <div style="font-size:12px;color:var(--warn);margin-top:-4px">⚠ Requires Deno installed in the worker container.</div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-dest')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveDestination()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Destination SLA modal -->
+<div class="modal-overlay" id="modal-dest-sla">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header"><div class="modal-title" id="sla-modal-title">Delivery SLA</div><span class="panel-close" onclick="closeModal('modal-dest-sla')">✕</span></div>
+    <div class="modal-body" id="sla-modal-body">
+      <div style="color:var(--text3);text-align:center;padding:32px">Loading…</div>
+    </div>
+  </div>
+</div>
+
+<!-- New Alert modal -->
+<div class="modal-overlay" id="modal-alert">
+  <div class="modal">
+    <div class="modal-header"><div class="modal-title">New Alert Channel</div><span class="panel-close" onclick="closeModal('modal-alert')">✕</span></div>
+    <div class="modal-body">
+      <div class="input-group"><label class="input-label">Name</label><input class="input" id="alert-name" placeholder="#ops-alerts"></div>
+      <div class="input-group">
+        <label class="input-label">Channel Type</label>
+        <select class="select" id="alert-type" onchange="toggleAlertFields()">
+          <option value="slack">Slack</option>
+          <option value="email">Email (SMTP)</option>
+        </select>
+      </div>
+      <div id="alert-slack-fields">
+        <div class="input-group"><label class="input-label">Slack Webhook URL</label><input class="input" id="alert-slack-url" placeholder="https://hooks.slack.com/services/…"></div>
+      </div>
+      <div id="alert-email-fields" style="display:none">
+        <div class="input-group"><label class="input-label">SMTP Host</label><input class="input" id="alert-smtp-host" placeholder="smtp.gmail.com"></div>
+        <div class="input-group"><label class="input-label">SMTP Port</label><input class="input" type="number" id="alert-smtp-port" value="587"></div>
+        <div class="input-group"><label class="input-label">Username</label><input class="input" id="alert-smtp-user"></div>
+        <div class="input-group"><label class="input-label">Password</label><input class="input" type="password" id="alert-smtp-pass"></div>
+        <div class="input-group"><label class="input-label">From</label><input class="input" id="alert-smtp-from"></div>
+        <div class="input-group"><label class="input-label">To</label><input class="input" id="alert-smtp-to"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-alert')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveAlert()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Invite member modal -->
+<div class="modal-overlay" id="modal-invite">
+  <div class="modal">
+    <div class="modal-header"><div class="modal-title">Invite Team Member</div><span class="panel-close" onclick="closeModal('modal-invite')">✕</span></div>
+    <div class="modal-body">
+      <div class="input-group"><label class="input-label">Email</label><input class="input" id="invite-email" placeholder="colleague@company.com"></div>
+      <div class="input-group">
+        <label class="input-label">Role</label>
+        <select class="select" id="invite-role">
+          <option value="viewer">Viewer</option>
+          <option value="admin">Admin</option>
+          <option value="owner">Owner</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-invite')">Cancel</button>
+      <button class="btn btn-primary" onclick="inviteMember()">Invite</button>
+    </div>
+  </div>
+</div>
+
+<!-- Event type modal -->
+<div class="modal-overlay" id="modal-event-type">
+  <div class="modal">
+    <div class="modal-header"><div class="modal-title">New Event Type</div><span class="panel-close" onclick="closeModal('modal-event-type')">✕</span></div>
+    <div class="modal-body">
+      <div class="input-group"><label class="input-label">Name *</label><input class="input" id="et-name" placeholder="payment.succeeded"></div>
+      <div class="input-group"><label class="input-label">Description</label><input class="input" id="et-desc" placeholder="Fired when a payment succeeds"></div>
+      <div class="input-group"><label class="input-label">Version</label><input class="input" id="et-version" value="1"></div>
+      <div class="input-group"><label class="input-label">Example Payload (JSON)</label><textarea class="textarea" id="et-example" placeholder='{"event":"payment.succeeded"}'></textarea></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-event-type')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEventType()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
 </body>
 </html>
