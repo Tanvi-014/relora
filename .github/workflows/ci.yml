@@ -28,8 +28,8 @@ jobs:
           --health-retries 10
 
     env:
-      DATABASE_URL: postgresql+asyncpg://relora:hermesdev@localhost:5432/hermes
-      SYNC_DATABASE_URL: postgresql://relora:hermesdev@localhost:5432/hermes
+      DATABASE_URL: postgresql+asyncpg://relora:hermesdev@localhost:5432/relora
+      SYNC_DATABASE_URL: postgresql://relora:hermesdev@localhost:5432/relora
       ENVIRONMENT: development
       AUTO_CREATE_TABLES: "true"
       ALLOW_PRIVATE_DESTINATIONS: "true"
