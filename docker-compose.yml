@@ -59,6 +59,7 @@ services:
       BACKOFF_BASE_SECONDS: ${BACKOFF_BASE_SECONDS:-30}
       HTTP_CLIENT_TIMEOUT_SECONDS: ${HTTP_CLIENT_TIMEOUT_SECONDS:-10}
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-60}
+      MONTHLY_EVENT_QUOTA: ${MONTHLY_EVENT_QUOTA:-0}
       JWT_SECRET: ${JWT_SECRET:-change-in-production}
       HERMES_API_KEY: ${HERMES_API_KEY:-}
       HERMES_API_KEYS: ${HERMES_API_KEYS:-}
@@ -68,8 +69,8 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ENABLE_AI_FEATURES: ${ENABLE_AI_FEATURES:-false}
       ENABLE_SIMULATOR: "true"
-      FORCE_HTTPS: "false"
-      COOKIE_SECURE: "false"
+      FORCE_HTTPS: ${FORCE_HTTPS:-false}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
     volumes:
       - ./backend:/workspace/backend:ro
       - ./frontend:/workspace/frontend:ro
@@ -90,8 +91,9 @@ services:
       dockerfile: backend/Dockerfile
     container_name: hermes-worker
     command: python -m app.worker_main
+    stop_grace_period: 40s
     healthcheck:
-      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      test: ["CMD", "python", "-c", "s=open('/proc/1/stat').read().split(); assert s[2]!='Z','worker zombie'"]
       interval: 30s
       timeout: 5s
       retries: 3

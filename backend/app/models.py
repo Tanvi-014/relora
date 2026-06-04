@@ -29,6 +29,58 @@ class CircuitState(str, enum.Enum):
     HALF_OPEN = "half_open"
 
 
+class FailureCategory(str, enum.Enum):
+    AUTHENTICATION = "AUTHENTICATION"
+    AUTHORIZATION = "AUTHORIZATION"
+    RATE_LIMITING = "RATE_LIMITING"
+    CLIENT_ERROR = "CLIENT_ERROR"
+    SERVER_ERROR = "SERVER_ERROR"
+    NETWORK = "NETWORK"
+    TIMEOUT = "TIMEOUT"
+    DNS = "DNS"
+    SSL = "SSL"
+    TRANSFORM = "TRANSFORM"
+    FILTER = "FILTER"
+    CIRCUIT_BREAKER = "CIRCUIT_BREAKER"
+    CONFIGURATION = "CONFIGURATION"
+    UNKNOWN = "UNKNOWN"
+
+
+class FailureSeverity(str, enum.Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class FailureRecoverability(str, enum.Enum):
+    AUTOMATIC = "automatic"
+    MANUAL = "manual"
+    UNLIKELY = "unlikely"
+
+
+class IncidentState(str, enum.Enum):
+    OPEN = "OPEN"
+    INVESTIGATING = "INVESTIGATING"
+    RECOVERING = "RECOVERING"
+    RESOLVED = "RESOLVED"
+
+
+class TrendState(str, enum.Enum):
+    STABLE = "STABLE"
+    SLOW_GROWTH = "SLOW_GROWTH"
+    MODERATE_GROWTH = "MODERATE_GROWTH"
+    RAPID_GROWTH = "RAPID_GROWTH"
+    EXPLOSIVE_GROWTH = "EXPLOSIVE_GROWTH"
+
+
+class DestinationHealth(str, enum.Enum):
+    HEALTHY = "HEALTHY"
+    DEGRADED = "DEGRADED"
+    UNHEALTHY = "UNHEALTHY"
+    CRITICAL = "CRITICAL"
+
+
 # ---------------------------------------------------------------------------
 # Core webhook tables
 # ---------------------------------------------------------------------------
@@ -115,6 +167,16 @@ class DeliveryAttempt(Base):
     retry_strategy_used = Column(String, nullable=True)
     attempted_at = Column(DateTime(timezone=True), nullable=False, default=_now)
 
+    # Failure classification fields
+    failure_category = Column(String, nullable=True)
+    failure_subcategory = Column(String, nullable=True)
+    failure_severity = Column(String, nullable=True)
+    failure_recoverability = Column(String, nullable=True)
+    error_signature = Column(String, nullable=True)
+
+    # Response body is zlib-compressed when > 1 KB; this flag tells readers to decompress
+    response_body_compressed = Column(Boolean, nullable=False, default=False)
+
     webhook = relationship("Webhook", back_populates="attempts")
 
     def to_dict(self):
@@ -128,10 +190,17 @@ class DeliveryAttempt(Base):
             "error_message": self.error_message,
             "retry_strategy_used": self.retry_strategy_used,
             "attempted_at": self.attempted_at.isoformat() if self.attempted_at else None,
+            "failure_category": self.failure_category,
+            "failure_subcategory": self.failure_subcategory,
+            "failure_severity": self.failure_severity,
+            "failure_recoverability": self.failure_recoverability,
+            "error_signature": self.error_signature,
         }
 
     __table_args__ = (
         Index("ix_delivery_attempts_webhook_id_attempt_number", "webhook_id", "attempt_number"),
+        Index("ix_delivery_attempts_failure_category", "failure_category"),
+        Index("ix_delivery_attempts_error_signature", "error_signature"),
     )
 
 
@@ -391,3 +460,89 @@ class ReplayJob(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+# ---------------------------------------------------------------------------
+# DLQ Intelligence - Incidents
+# ---------------------------------------------------------------------------
+
+class Incident(Base):
+    __tablename__ = "incidents"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    destination_id = Column(UUID(as_uuid=True), ForeignKey("destinations.id", ondelete="SET NULL"), nullable=True)
+    
+    # Incident identification
+    incident_signature = Column(String, nullable=False, index=True)  # Unique signature for grouping
+    state = Column(String, nullable=False, default=IncidentState.OPEN.value)
+    
+    # Root cause information
+    failure_category = Column(String, nullable=True)
+    failure_subcategory = Column(String, nullable=True)
+    root_cause = Column(Text, nullable=True)
+    
+    # Metrics
+    affected_webhook_count = Column(Integer, nullable=False, default=0)
+    first_seen_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+    last_seen_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+    
+    # Trend analysis
+    trend_state = Column(String, nullable=True)
+    growth_rate_15m = Column(Integer, nullable=False, default=0)
+    growth_rate_1h = Column(Integer, nullable=False, default=0)
+    growth_rate_6h = Column(Integer, nullable=False, default=0)
+    growth_rate_24h = Column(Integer, nullable=False, default=0)
+    
+    # Severity and recoverability
+    severity = Column(String, nullable=True)
+    recoverability = Column(String, nullable=True)
+    
+    # Recommendations
+    recommended_action = Column(Text, nullable=True)
+    expected_recovery_difficulty = Column(String, nullable=True)
+    
+    # Resolution
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    resolution_notes = Column(Text, nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+    project = relationship("Project")
+    destination = relationship("Destination")
+
+    def to_dict(self):
+        return {
+            "id": str(self.id),
+            "project_id": str(self.project_id),
+            "destination_id": str(self.destination_id) if self.destination_id else None,
+            "incident_signature": self.incident_signature,
+            "state": self.state,
+            "failure_category": self.failure_category,
+            "failure_subcategory": self.failure_subcategory,
+            "root_cause": self.root_cause,
+            "affected_webhook_count": self.affected_webhook_count,
+            "first_seen_at": self.first_seen_at.isoformat() if self.first_seen_at else None,
+            "last_seen_at": self.last_seen_at.isoformat() if self.last_seen_at else None,
+            "trend_state": self.trend_state,
+            "growth_rate_15m": self.growth_rate_15m,
+            "growth_rate_1h": self.growth_rate_1h,
+            "growth_rate_6h": self.growth_rate_6h,
+            "growth_rate_24h": self.growth_rate_24h,
+            "severity": self.severity,
+            "recoverability": self.recoverability,
+            "recommended_action": self.recommended_action,
+            "expected_recovery_difficulty": self.expected_recovery_difficulty,
+            "resolved_at": self.resolved_at.isoformat() if self.resolved_at else None,
+            "resolution_notes": self.resolution_notes,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+    __table_args__ = (
+        Index("ix_incidents_project_id", "project_id"),
+        Index("ix_incidents_destination_id", "destination_id"),
+        Index("ix_incidents_state", "state"),
+        Index("ix_incidents_first_seen_at", "first_seen_at"),
+    )

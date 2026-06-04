@@ -3,9 +3,11 @@ Delivery worker — claims webhooks atomically via SELECT FOR UPDATE SKIP LOCKED
 delivers with Standard Webhooks signing, adaptive retry, and circuit breaker.
 """
 import asyncio
+import base64
 import json
 import logging
 import time
+import zlib
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
@@ -16,11 +18,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.alerts import dispatch_dlq_alert
 from app.circuit_breaker import should_deliver, record_outcome
+from app.telemetry import record_delivered, record_delivery_failed, record_dlq
 from app.config import settings
 from app.db import async_session
+from app.failure_classifier import FailureClassifier
+from app.incident_engine import IncidentEngine
 from app.logging_config import configure_logging
 from app.models import Webhook, WebhookStatus, DeliveryAttempt, Destination
 from app.retry_strategy import compute_next_attempt, RetryStrategy
+from app.sse_hub import sse_hub
 from app.standard_webhooks import sign_outbound_webhook
 from app.websocket_hub import ws_manager
 
@@ -31,6 +37,7 @@ logger = logging.getLogger("hermes.worker")
 # - Ordered webhooks (ordering_key set) are delivered strictly by creation order.
 # - If another webhook with the same ordering_key is PROCESSING, skip the whole group.
 # - Unordered webhooks are claimed freely.
+# - Added acquisition timeout to prevent priority inversion
 CLAIM_QUERY = text("""
 WITH eligible AS (
   SELECT w.id
@@ -59,6 +66,10 @@ RETURNING
   payload, headers, retry_count, max_retries, ordering_key
 """)
 
+# Set lock acquisition timeout at session level before claiming;
+# prevents workers from blocking each other when contention is high.
+SET_LOCK_TIMEOUT = text("SET LOCAL lock_timeout = '5000ms'")
+
 
 class WebhookWorker:
     def __init__(self, worker_id: int):
@@ -74,9 +85,22 @@ class WebhookWorker:
     async def stop(self):
         self.is_running = False
         if self.task:
-            self.task.cancel()
+            # Give the in-flight delivery up to 35s to finish naturally
+            # (HTTP_CLIENT_TIMEOUT_SECONDS default is 10s + DB overhead).
+            # Only force-cancel if it is stuck beyond that.
             try:
-                await self.task
+                await asyncio.wait_for(asyncio.shield(self.task), timeout=35.0)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Worker %d did not drain within 35s — force cancelling.",
+                    self.worker_id,
+                    extra={"event": "worker.stop_timeout", "worker_id": self.worker_id},
+                )
+                self.task.cancel()
+                try:
+                    await self.task
+                except (asyncio.CancelledError, Exception):
+                    pass
             except (asyncio.CancelledError, Exception):
                 pass
         logger.info("Worker stopped.", extra={"event": "worker.stopped", "worker_id": self.worker_id})
@@ -100,6 +124,7 @@ class WebhookWorker:
 
     async def _process_next_job(self, client: httpx.AsyncClient) -> bool:
         async with async_session() as session:
+            await session.execute(SET_LOCK_TIMEOUT)
             result = await session.execute(CLAIM_QUERY)
             row = result.fetchone()
             if not row:
@@ -252,18 +277,44 @@ class WebhookWorker:
             base_seconds=base_seconds,
         )
 
+        # Classify the failure
+        failure_category, failure_subcategory, failure_severity, failure_recoverability, error_signature = FailureClassifier.classify(
+            status_code=status_code,
+            error_message=error_message,
+            response_body=response_body,
+        )
+
+        # Compress response body if it's large before storing
+        compressed_response_body = None
+        if response_body and len(response_body) > 1024:  # Only compress if > 1KB
+            try:
+                compressed_response_body = base64.b64encode(
+                    zlib.compress(response_body.encode('utf-8'), level=6)
+                ).decode('ascii')
+            except Exception as e:
+                logger.warning("Failed to compress response body: %s", e)
+
         attempt = DeliveryAttempt(
             webhook_id=webhook_id,
             attempt_number=attempt_number,
             status_code=status_code,
-            response_body=response_body,
+            response_body=compressed_response_body if compressed_response_body else response_body,
             response_headers=response_headers_dict if response_headers_dict else None,
             duration_ms=duration_ms,
             error_message=error_message,
             retry_strategy_used=strategy.value,
             attempted_at=now,
+            failure_category=failure_category,
+            failure_subcategory=failure_subcategory,
+            failure_severity=failure_severity,
+            failure_recoverability=failure_recoverability,
+            error_signature=error_signature,
+            response_body_compressed=compressed_response_body is not None,
         )
         session.add(attempt)
+
+        new_retry_count = retry_count + 1
+        can_retry = False  # overridden in failure branch
 
         if success:
             logger.info("Webhook delivered.", extra={
@@ -281,13 +332,14 @@ class WebhookWorker:
                 text("UPDATE webhooks SET status='completed', last_attempt_at=:t, updated_at=:t WHERE id=:id"),
                 {"t": now, "id": webhook_id},
             )
+            record_delivered(tenant_id, destination_url, duration_ms)
             if destination_id:
                 try:
                     await record_outcome(session, UUID(str(destination_id)), success=True)
                 except Exception:
                     pass
         else:
-            new_retry_count = retry_count + 1
+            record_delivery_failed(tenant_id, destination_url, duration_ms)
             can_retry = (
                 new_retry_count < max_retries
                 and strategy != RetryStrategy.NO_RETRY
@@ -344,6 +396,28 @@ class WebhookWorker:
                     text("UPDATE webhooks SET status='failed', retry_count=:rc, last_attempt_at=:t, updated_at=:t WHERE id=:id"),
                     {"rc": new_retry_count, "t": now, "id": webhook_id},
                 )
+                
+                # Create or update incident for this failure
+                try:
+                    # Get project_id for the webhook
+                    project_result = await session.execute(
+                        select(Destination.project_id).where(Destination.id == destination_id)
+                    )
+                    project_id = project_result.scalar_one_or_none()
+                    
+                    if project_id:
+                        await IncidentEngine.get_or_create_incident(
+                            db=session,
+                            project_id=str(project_id),
+                            destination_id=destination_id,
+                            error_signature=error_signature,
+                            failure_category=failure_category,
+                            failure_subcategory=failure_subcategory,
+                        )
+                except Exception as ie:
+                    logger.error("Incident creation failed: %s", ie)
+                
+                record_dlq(tenant_id)
                 try:
                     await dispatch_dlq_alert(
                         session=session,
@@ -361,18 +435,42 @@ class WebhookWorker:
 
         # Broadcast to connected dashboard clients
         try:
+            if success:
+                _final_status = "completed"
+            elif can_retry:
+                _final_status = "pending"
+            else:
+                _final_status = "failed"
+
+            webhook_data = {
+                "id": _uuid_str(webhook_id),
+                "status": _final_status,
+                "retry_count": retry_count + 1,
+                "destination_url": destination_url,
+                "duration_ms": duration_ms,
+                "attempt_number": attempt_number,
+            }
+            
+            # Broadcast via WebSocket
             await ws_manager.broadcast(
                 project_key=tenant_id,
                 event_type="webhook.updated",
-                data={
-                    "id": _uuid_str(webhook_id),
-                    "status": "completed" if success else ("pending" if (new_retry_count if not success else 0) < max_retries and strategy != RetryStrategy.NO_RETRY else "failed"),
-                    "retry_count": retry_count + 1,
-                    "destination_url": destination_url,
-                    "duration_ms": duration_ms,
-                    "attempt_number": attempt_number,
-                },
+                data=webhook_data,
             )
+            
+            # Broadcast via SSE
+            await sse_hub.broadcast_webhook_update(tenant_id, webhook_data)
+            
+            # Also broadcast delivery attempt details
+            attempt_data = {
+                "webhook_id": _uuid_str(webhook_id),
+                "attempt_number": attempt_number,
+                "status_code": status_code,
+                "duration_ms": duration_ms,
+                "success": success,
+                "error_message": error_message,
+            }
+            await sse_hub.broadcast_delivery_attempt(tenant_id, attempt_data)
         except Exception:
             pass
 

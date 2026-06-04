@@ -8,31 +8,36 @@
 </head>
 <body>
 <div id="app">
-  <!-- Header -->
+
+  <!-- ── Header ── -->
   <header class="header">
     <a class="header-logo" href="#">
-      <div class="logo-icon">⚡</div>
+      <div class="logo-icon">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+        </svg>
+      </div>
       Hermes
     </a>
 
     <div class="header-spacer"></div>
 
-    <!-- WS status -->
-    <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text3)">
+    <div class="ws-status-pill" id="ws-status-pill">
       <div class="ws-dot connecting" id="ws-dot"></div>
-      <span id="ws-status-text">Connecting…</span>
+      <span id="ws-status-text">Connecting</span>
     </div>
 
     <!-- Project switcher -->
     <div class="project-switcher" id="ps-trigger">
-      <span style="font-size:13px">📁</span>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18M3 12h18M3 17h18"/></svg>
       <span class="ps-name" id="ps-name">Loading…</span>
-      <span class="ps-arrow">▼</span>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
       <div class="ps-dropdown" id="ps-dropdown">
         <div id="ps-list"></div>
         <div class="ps-separator"></div>
         <div class="ps-item" onclick="openNewProjectModal()">
-          <span>+</span> New Project
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+          New Project
         </div>
       </div>
     </div>
@@ -40,7 +45,7 @@
     <!-- User menu -->
     <div class="user-menu" id="user-menu-trigger">
       <div class="user-avatar" id="user-initial">?</div>
-      <span style="font-size:13px;font-weight:500" id="user-email-short">…</span>
+      <span class="user-email-short" id="user-email-short">…</span>
       <div class="user-dropdown" id="user-dropdown">
         <div class="user-dropdown-item" id="user-email-full" style="color:var(--text3);font-size:12px;cursor:default"></div>
         <div class="ps-separator"></div>
@@ -49,86 +54,220 @@
     </div>
   </header>
 
-  <!-- Body -->
+  <!-- ── Body ── -->
   <div class="main-body">
-    <!-- Sidebar -->
+    <!-- ── Sidebar ── -->
     <nav class="sidebar">
       <div class="nav-section"><span class="nav-section-label">Observe</span></div>
+
       <div class="nav-item active" data-page="overview" onclick="navTo('overview')">
-        <span class="nav-icon">📊</span> Overview
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+          <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+        </svg>
+        Overview
       </div>
+
       <div class="nav-item" data-page="webhooks" onclick="navTo('webhooks')">
-        <span class="nav-icon">📨</span> Webhooks
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 2L11 13"/><path d="M22 2L15 22l-4-9-9-4 20-7z"/>
+        </svg>
+        Webhooks
         <span class="nav-badge hidden" id="failed-badge">0</span>
       </div>
 
+      <div class="nav-item" data-page="dlq-intelligence" onclick="navTo('dlq-intelligence')">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+          <path d="M11 8v3l2 2"/>
+        </svg>
+        DLQ Intelligence
+      </div>
+
       <div class="nav-section"><span class="nav-section-label">Configure</span></div>
+
       <div class="nav-item" data-page="destinations" onclick="navTo('destinations')">
-        <span class="nav-icon">🎯</span> Destinations
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/>
+          <line x1="12" y1="3" x2="12" y2="9"/><line x1="12" y1="15" x2="12" y2="21"/>
+          <line x1="3" y1="12" x2="9" y2="12"/><line x1="15" y1="12" x2="21" y2="12"/>
+        </svg>
+        Destinations
       </div>
+
       <div class="nav-item" data-page="event-types" onclick="navTo('event-types')">
-        <span class="nav-icon">📋</span> Event Types
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/>
+        </svg>
+        Event Types
       </div>
+
       <div class="nav-item" data-page="alerts" onclick="navTo('alerts')">
-        <span class="nav-icon">🔔</span> Alerts
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </svg>
+        Alerts
       </div>
 
       <div class="nav-section"><span class="nav-section-label">Tools</span></div>
+
       <div class="nav-item" data-page="analytics" onclick="navTo('analytics')">
-        <span class="nav-icon">📈</span> Analytics
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
+        </svg>
+        Analytics
       </div>
+
       <div class="nav-item" data-page="simulate" onclick="navTo('simulate')">
-        <span class="nav-icon">🧪</span> Simulate
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="5 3 19 12 5 21 5 3"/>
+        </svg>
+        Simulate
       </div>
+
       <div class="nav-item" data-page="replay" onclick="navTo('replay')">
-        <span class="nav-icon">🔁</span> Bulk Replay
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/>
+        </svg>
+        Bulk Replay
       </div>
+
       <div class="nav-item" data-page="ai" onclick="navTo('ai')">
-        <span class="nav-icon">🤖</span> AI Tools
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/>
+        </svg>
+        AI Tools
       </div>
 
       <div class="nav-section"><span class="nav-section-label">Account</span></div>
+
       <div class="nav-item" data-page="team" onclick="navTo('team')">
-        <span class="nav-icon">👥</span> Team
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+        Team
       </div>
+
       <div class="nav-item" data-page="settings" onclick="navTo('settings')">
-        <span class="nav-icon">⚙️</span> Settings
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        Settings
       </div>
     </nav>
 
-    <!-- Content + Detail panel -->
+    <!-- ── Content + Detail panel ── -->
     <div style="display:flex;flex:1;overflow:hidden">
       <div class="content" id="content-area">
 
-        <!-- ── Overview page ── -->
+        <!-- ══════════════════════════════════════════
+             Overview page — system health dashboard
+             ══════════════════════════════════════════ -->
         <div class="page active" id="page-overview">
-          <div class="page-title">Overview</div>
-          <div class="page-subtitle">Real-time webhook delivery status</div>
-          <div class="stats-grid">
-            <div class="stat-card"><div class="stat-label">Total</div><div class="stat-value" id="stat-total">—</div></div>
-            <div class="stat-card"><div class="stat-label">Pending</div><div class="stat-value pending" id="stat-pending">—</div></div>
-            <div class="stat-card"><div class="stat-label">Processing</div><div class="stat-value processing" id="stat-processing">—</div></div>
-            <div class="stat-card"><div class="stat-label">Completed</div><div class="stat-value completed" id="stat-completed">—</div></div>
-            <div class="stat-card"><div class="stat-label">Failed (DLQ)</div><div class="stat-value failed" id="stat-failed">—</div></div>
-            <div class="stat-card"><div class="stat-label">Success Rate</div><div class="stat-value rate" id="stat-rate">—</div></div>
-          </div>
-          <div class="card">
-            <div class="card-header">
-              <div class="card-title">Recent Webhooks</div>
-              <button class="btn btn-sm btn-ghost" onclick="navTo('webhooks')">View all →</button>
-            </div>
-            <div id="overview-table-wrap"></div>
-          </div>
-        </div>
 
-        <!-- ── Webhooks page ── -->
+          <!-- Health banner -->
+          <div class="health-banner healthy" id="health-banner">
+            <div class="health-banner-left">
+              <div class="health-dot-large" id="health-dot-large"></div>
+              <div>
+                <div class="health-banner-title" id="health-banner-title">System Healthy</div>
+                <div class="health-banner-sub" id="health-banner-sub">All destinations delivering normally</div>
+              </div>
+            </div>
+            <div class="health-banner-right">
+              <span class="health-updated" id="health-updated">—</span>
+              <button class="btn btn-ghost btn-sm" onclick="loadDashboard()" title="Refresh">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- KPI row -->
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-label">Success Rate</div>
+              <div class="kpi-value" id="kpi-success-rate">—</div>
+              <div class="kpi-sub" id="kpi-success-sub">last 24 hours</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">P95 Latency</div>
+              <div class="kpi-value" id="kpi-p95">—</div>
+              <div class="kpi-sub">all destinations · 24 h</div>
+            </div>
+            <div class="kpi-card kpi-card--alert" id="kpi-dlq-card">
+              <div class="kpi-label">DLQ Depth</div>
+              <div class="kpi-value" id="kpi-dlq">—</div>
+              <div class="kpi-sub" id="kpi-dlq-sub">failed webhooks</div>
+            </div>
+            <div class="kpi-card" id="kpi-circuit-card">
+              <div class="kpi-label">Circuit Breakers</div>
+              <div class="kpi-value" id="kpi-circuit">—</div>
+              <div class="kpi-sub" id="kpi-circuit-sub">destinations healthy</div>
+            </div>
+          </div>
+
+          <!-- Active incidents (hidden when none) -->
+          <div id="incidents-section" style="display:none">
+            <div class="section-header">
+              <span class="section-title">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                Active Incidents
+              </span>
+              <a class="section-link" onclick="navTo('dlq-intelligence')">View all →</a>
+            </div>
+            <div id="incidents-list"></div>
+          </div>
+
+          <!-- Lower: sparkline + recent failures -->
+          <div class="overview-lower">
+            <!-- Throughput sparkline -->
+            <div class="card">
+              <div class="card-header">
+                <div class="card-title">Delivery Throughput</div>
+                <span class="card-meta">Last 24 hours</span>
+              </div>
+              <div class="sparkline-wrap" id="throughput-chart">
+                <div class="sparkline-empty">No delivery data yet</div>
+              </div>
+              <div class="sparkline-legend">
+                <span class="sparkline-legend-dot delivered"></span> Delivered
+                <span class="sparkline-legend-dot failed" style="margin-left:16px"></span> Failed
+              </div>
+            </div>
+
+            <!-- Recent failures -->
+            <div class="card">
+              <div class="card-header">
+                <div class="card-title">Recent Failures</div>
+                <a class="card-link" onclick="navTo('webhooks')">View all →</a>
+              </div>
+              <div id="recent-failures-list">
+                <div class="empty-state-sm">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg>
+                  <div>No recent failures</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /page-overview -->
+
+        <!-- ══════════════════════════════════════════
+             Webhooks page
+             ══════════════════════════════════════════ -->
         <div class="page" id="page-webhooks">
           <div class="page-title">Webhooks</div>
           <div class="page-subtitle">All ingested webhook events and their delivery status</div>
           <div class="table-wrap">
             <div class="table-toolbar">
               <div class="search-input">
-                <input class="input" id="wh-search" placeholder="Search payload content…" oninput="debounceSearch()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text3)"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                <input class="input" id="wh-search" placeholder="Search payload content…" oninput="debounceSearch()" style="padding-left:32px">
               </div>
               <select class="select" style="width:150px" id="wh-status-filter" onchange="loadWebhooks(1)">
                 <option value="">All statuses</option>
@@ -140,57 +279,103 @@
               <select class="select" style="width:180px" id="wh-dest-filter" onchange="loadWebhooks(1)">
                 <option value="">All destinations</option>
               </select>
-              <button class="btn btn-secondary btn-sm" onclick="loadWebhooks(1)">↻ Refresh</button>
+              <button class="btn btn-secondary btn-sm" onclick="loadWebhooks(1)">Refresh</button>
             </div>
             <div id="webhooks-table-body">
-              <div class="empty-state"><div class="icon">📭</div><div class="title">No webhooks yet</div><div class="desc">Ingest a webhook to get started</div></div>
+              <div class="empty-state">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><path d="M22 2L11 13"/><path d="M22 2L15 22l-4-9-9-4 20-7z"/></svg>
+                <div class="title">No webhooks yet</div>
+                <div class="desc">Ingest a webhook to get started</div>
+              </div>
             </div>
             <div class="pagination" id="wh-pagination"></div>
           </div>
         </div>
 
-        <!-- ── Destinations page ── -->
+        <!-- ══════════════════════════════════════════
+             Destinations page
+             ══════════════════════════════════════════ -->
         <div class="page" id="page-destinations">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
             <div>
               <div class="page-title">Destinations</div>
-              <div class="page-subtitle" style="margin-bottom:0">Registered delivery endpoints</div>
+              <div class="page-subtitle" style="margin-bottom:0">Delivery endpoints and circuit breaker state</div>
             </div>
-            <button class="btn btn-primary" onclick="openDestModal()">+ New Destination</button>
+            <button class="btn btn-primary" onclick="openDestModal()">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+              New Destination
+            </button>
           </div>
-          <div class="dest-grid" id="dest-grid">
-            <div class="empty-state"><div class="icon">🎯</div><div class="title">No destinations yet</div><div class="desc">Create a destination to start routing webhooks</div></div>
+          <!-- Circuit breaker open banner (shown when any dest is open) -->
+          <div class="cb-open-banner hidden" id="cb-open-banner">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <span id="cb-open-banner-text">1 destination circuit breaker is OPEN — deliveries suspended.</span>
+          </div>
+          <div class="table-wrap" id="dest-table-wrap">
+            <table id="dest-table">
+              <thead>
+                <tr>
+                  <th style="width:100px">Status</th>
+                  <th>Name</th>
+                  <th>URL</th>
+                  <th style="width:90px">Retries</th>
+                  <th style="width:100px">Circuit</th>
+                  <th style="width:80px"></th>
+                </tr>
+              </thead>
+              <tbody id="dest-tbody">
+                <tr><td colspan="6">
+                  <div class="empty-state">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/></svg>
+                    <div class="title">No destinations yet</div>
+                    <div class="desc">Add a destination to start routing webhooks to your endpoints.</div>
+                  </div>
+                </td></tr>
+              </tbody>
+            </table>
           </div>
         </div>
 
-        <!-- ── Event Types page ── -->
+        <!-- ══════════════════════════════════════════
+             Event Types page
+             ══════════════════════════════════════════ -->
         <div class="page" id="page-event-types">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
             <div>
               <div class="page-title">Event Types</div>
               <div class="page-subtitle" style="margin-bottom:0">Schema catalog for your webhook events</div>
             </div>
-            <button class="btn btn-primary" onclick="openEventTypeModal()">+ New Event Type</button>
+            <button class="btn btn-primary" onclick="openEventTypeModal()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+              New Event Type
+            </button>
           </div>
           <div id="event-types-list"></div>
         </div>
 
-        <!-- ── Alerts page ── -->
+        <!-- ══════════════════════════════════════════
+             Alerts page
+             ══════════════════════════════════════════ -->
         <div class="page" id="page-alerts">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
             <div>
               <div class="page-title">Alerts</div>
               <div class="page-subtitle" style="margin-bottom:0">Get notified when webhooks hit the dead letter queue</div>
             </div>
-            <button class="btn btn-primary" onclick="openAlertModal()">+ New Alert</button>
+            <button class="btn btn-primary" onclick="openAlertModal()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+              New Alert Channel
+            </button>
           </div>
           <div id="alerts-list"></div>
         </div>
 
-        <!-- ── Simulate page ── -->
+        <!-- ══════════════════════════════════════════
+             Simulate page
+             ══════════════════════════════════════════ -->
         <div class="page" id="page-simulate">
           <div class="page-title">Simulate</div>
-          <div class="page-subtitle">Fire realistic fake events from known providers</div>
+          <div class="page-subtitle">Fire realistic test events from known providers — watch them deliver in real time</div>
           <div style="display:grid;grid-template-columns:360px 1fr;gap:20px">
             <div class="card">
               <div class="card-title" style="margin-bottom:16px">Event Builder</div>
@@ -212,9 +397,10 @@
                   <option value="">Select destination…</option>
                 </select>
               </div>
-              <div style="margin-top:4px">
-                <button class="btn btn-primary" style="width:100%" onclick="fireSimulation()">⚡ Fire Webhook</button>
-              </div>
+              <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick="fireSimulation()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                Fire Webhook
+              </button>
             </div>
             <div class="card">
               <div class="card-title" style="margin-bottom:16px">Result</div>
@@ -223,130 +409,250 @@
           </div>
         </div>
 
-        <!-- ── Analytics / SLA page ── -->
+        <!-- ══════════════════════════════════════════
+             Analytics page
+             ══════════════════════════════════════════ -->
         <div class="page" id="page-analytics">
           <div class="page-title">Analytics</div>
           <div class="page-subtitle">Delivery SLA — P50 / P95 / P99 latency per destination, last 7 days</div>
           <div id="analytics-content">
-            <div class="empty-state"><div class="icon">📈</div><div class="title">Loading…</div></div>
+            <div class="empty-state">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+              <div class="title">Loading…</div>
+            </div>
           </div>
         </div>
 
-        <!-- ── AI Tools page ── -->
+        <!-- ══════════════════════════════════════════
+             AI Tools page
+             ══════════════════════════════════════════ -->
         <div class="page" id="page-ai">
-          <div class="page-title">AI Tools</div>
+          <div class="page-title">AI Intelligence</div>
           <div class="page-subtitle">Claude-powered payload analysis, filter suggestions, and transform generation</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
-            <!-- Analyze panel -->
-            <div class="card">
-              <div class="card-title" style="margin-bottom:4px">Analyze Payload</div>
-              <div style="font-size:12px;color:var(--text3);margin-bottom:16px">Paste any webhook payload — Claude detects the provider, event type, and suggests filters &amp; field mappings.</div>
-              <div class="input-group">
-                <label class="input-label">Payload JSON</label>
-                <textarea class="textarea" id="ai-payload" rows="10" placeholder='{"type":"payment_intent.succeeded","data":{"object":{"id":"pi_abc","amount":4999}}}'></textarea>
-              </div>
-              <button class="btn btn-primary" style="width:100%" onclick="aiAnalyze()">🤖 Analyze with Claude</button>
-            </div>
-            <!-- Result panel -->
-            <div class="card">
-              <div class="card-title" style="margin-bottom:16px">Analysis Result</div>
-              <div id="ai-result" style="color:var(--text3);font-size:13px">Run an analysis to see results here.</div>
-            </div>
+          <div id="ai-disabled-notice" style="display:none" class="inline-banner inline-banner--warn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <span>AI features not enabled. Set <span class="inline-code">ENABLE_AI_FEATURES=true</span> and <span class="inline-code">ANTHROPIC_API_KEY=sk-…</span> in your <span class="inline-code">.env</span>, then restart the API.</span>
           </div>
-
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px">
-            <!-- Suggest filter -->
-            <div class="card">
-              <div class="card-title" style="margin-bottom:4px">Suggest Filter</div>
-              <div style="font-size:12px;color:var(--text3);margin-bottom:16px">Describe in plain English what events you want — Claude returns the filter expression.</div>
-              <div class="input-group">
-                <label class="input-label">Sample Payload JSON</label>
-                <textarea class="textarea" id="ai-filter-payload" rows="5" placeholder='{"type":"payment.succeeded","data":{"amount":4999}}'></textarea>
-              </div>
-              <div class="input-group">
-                <label class="input-label">What do you want to filter?</label>
-                <input class="input" id="ai-filter-desc" placeholder="Only successful payments over $100">
-              </div>
-              <button class="btn btn-primary" style="width:100%" onclick="aiSuggestFilter()">🤖 Generate Filter</button>
-              <div id="ai-filter-result" style="margin-top:12px"></div>
+          <div id="ai-tools-content">
+            <div class="tabs" id="ai-tabs">
+              <div class="tab active" data-tab="analyze" onclick="switchAiTab('analyze')">Analyze Payload</div>
+              <div class="tab" data-tab="filter" onclick="switchAiTab('filter')">Suggest Filter</div>
+              <div class="tab" data-tab="transform" onclick="switchAiTab('transform')">Suggest Transform</div>
             </div>
-            <!-- Suggest transform -->
-            <div class="card">
-              <div class="card-title" style="margin-bottom:4px">Suggest Transform</div>
-              <div style="font-size:12px;color:var(--text3);margin-bottom:16px">Describe the shape you need — Claude writes the JavaScript transform function.</div>
-              <div class="input-group">
-                <label class="input-label">Sample Payload JSON</label>
-                <textarea class="textarea" id="ai-transform-payload" rows="5" placeholder='{"type":"payment.succeeded","data":{"object":{"id":"pi_abc","amount":4999}}}'></textarea>
+
+            <!-- Analyze tab -->
+            <div id="ai-tab-analyze" class="ai-tab-panel" style="display:grid;grid-template-columns:2fr 3fr;gap:16px">
+              <div>
+                <div class="input-group">
+                  <label class="input-label">Payload JSON</label>
+                  <textarea class="textarea code-editor" id="ai-payload" rows="12" placeholder='{"type":"payment_intent.succeeded","data":{"object":{"id":"pi_abc","amount":4999}}}'></textarea>
+                </div>
+                <button class="btn btn-primary" style="width:100%" onclick="aiAnalyze()">Analyze with Claude</button>
               </div>
-              <div class="input-group">
-                <label class="input-label">Describe the output shape</label>
-                <input class="input" id="ai-transform-desc" placeholder="Give me just the id and amount in cents">
+              <div class="ai-result-panel">
+                <div class="ai-result-panel-title">Result</div>
+                <div id="ai-result" class="ai-result-empty">Fire an analysis to see results here.</div>
               </div>
-              <button class="btn btn-primary" style="width:100%" onclick="aiSuggestTransform()">🤖 Generate Transform</button>
-              <div id="ai-transform-result" style="margin-top:12px"></div>
+            </div>
+
+            <!-- Filter tab -->
+            <div id="ai-tab-filter" class="ai-tab-panel" style="display:none;grid-template-columns:2fr 3fr;gap:16px">
+              <div>
+                <div class="input-group">
+                  <label class="input-label">Sample Payload JSON</label>
+                  <textarea class="textarea code-editor" id="ai-filter-payload" rows="8" placeholder='{"type":"payment.succeeded","data":{"amount":4999}}'></textarea>
+                </div>
+                <div class="input-group">
+                  <label class="input-label">What do you want to filter?</label>
+                  <input class="input" id="ai-filter-desc" placeholder="Only successful payments over $100">
+                </div>
+                <button class="btn btn-primary" style="width:100%" onclick="aiSuggestFilter()">Generate Filter</button>
+              </div>
+              <div class="ai-result-panel">
+                <div class="ai-result-panel-title">Generated Filter</div>
+                <div id="ai-filter-result" class="ai-result-empty">Run generation to see the filter expression here.</div>
+              </div>
+            </div>
+
+            <!-- Transform tab -->
+            <div id="ai-tab-transform" class="ai-tab-panel" style="display:none;grid-template-columns:2fr 3fr;gap:16px">
+              <div>
+                <div class="input-group">
+                  <label class="input-label">Sample Payload JSON</label>
+                  <textarea class="textarea code-editor" id="ai-transform-payload" rows="8" placeholder='{"type":"payment.succeeded","data":{"object":{"id":"pi_abc","amount":4999}}}'></textarea>
+                </div>
+                <div class="input-group">
+                  <label class="input-label">Describe the output shape</label>
+                  <input class="input" id="ai-transform-desc" placeholder="Give me just the id and amount in cents">
+                </div>
+                <button class="btn btn-primary" style="width:100%" onclick="aiSuggestTransform()">Generate Transform</button>
+              </div>
+              <div class="ai-result-panel">
+                <div class="ai-result-panel-title">Generated Transform</div>
+                <div id="ai-transform-result" class="ai-result-empty">Run generation to see the JavaScript function here.</div>
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- ── Bulk Replay page ── -->
+        <!-- ══════════════════════════════════════════
+             Bulk Replay page
+             ══════════════════════════════════════════ -->
         <div class="page" id="page-replay">
-          <div class="page-title">Bulk Replay</div>
-          <div class="page-subtitle">Re-queue all webhooks from a time window — essential for post-incident recovery</div>
-          <div style="display:grid;grid-template-columns:400px 1fr;gap:20px">
-            <div class="card">
-              <div class="card-title" style="margin-bottom:16px">Replay Window</div>
-              <div class="input-group">
+          <div class="page-title">Replay Jobs</div>
+          <div class="page-subtitle">Re-queue webhooks from a time window — essential for post-incident recovery</div>
+          <!-- Compact form bar -->
+          <div class="card" style="margin-bottom:16px">
+            <div style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap">
+              <div class="input-group" style="flex:1;min-width:160px;margin-bottom:0">
                 <label class="input-label">From</label>
                 <input class="input" type="datetime-local" id="replay-from">
               </div>
-              <div class="input-group">
+              <div class="input-group" style="flex:1;min-width:160px;margin-bottom:0">
                 <label class="input-label">To</label>
                 <input class="input" type="datetime-local" id="replay-to">
               </div>
-              <div class="input-group">
-                <label class="input-label">Destination (optional)</label>
-                <select class="select" id="replay-dest">
-                  <option value="">All destinations</option>
-                </select>
+              <div class="input-group" style="flex:1;min-width:160px;margin-bottom:0">
+                <label class="input-label">Destination</label>
+                <select class="select" id="replay-dest"><option value="">All destinations</option></select>
               </div>
-              <div class="input-group">
-                <label class="input-label">Rate (events/minute)</label>
+              <div class="input-group" style="width:140px;margin-bottom:0">
+                <label class="input-label">Rate (events/min)</label>
                 <input class="input" type="number" id="replay-rate" value="100" min="1" max="1000">
               </div>
-              <button class="btn btn-primary" style="width:100%" onclick="startBulkReplay()">🔁 Start Replay</button>
+              <button class="btn btn-primary" style="flex-shrink:0;align-self:flex-end" onclick="startBulkReplay()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
+                Start Replay Job
+              </button>
             </div>
-            <div class="card">
-              <div class="card-title" style="margin-bottom:16px">Recent Replay Jobs</div>
-              <div id="replay-jobs-list" style="color:var(--text3);font-size:13px">No replay jobs yet.</div>
+          </div>
+          <!-- Jobs table -->
+          <div class="table-wrap">
+            <div class="table-toolbar" style="padding:12px 16px">
+              <span style="font-size:13px;font-weight:500">Replay Jobs</span>
+            </div>
+            <div id="replay-jobs-list">
+              <div class="empty-state">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
+                <div class="title">No replay jobs yet</div>
+                <div class="desc">Replay re-queues failed webhooks through the delivery pipeline at a controlled rate.</div>
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- ── Team page ── -->
+        <!-- ══════════════════════════════════════════
+             Team page
+             ══════════════════════════════════════════ -->
         <div class="page" id="page-team">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
             <div>
               <div class="page-title">Team</div>
               <div class="page-subtitle" style="margin-bottom:0">Manage project members and roles</div>
             </div>
-            <button class="btn btn-primary" onclick="openInviteModal()">+ Invite Member</button>
+            <button class="btn btn-primary" onclick="openInviteModal()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+              Invite Member
+            </button>
           </div>
-          <div class="card">
-            <div id="team-list"></div>
+          <div class="card"><div id="team-list"></div></div>
+        </div>
+
+        <!-- ══════════════════════════════════════════
+             Settings page
+             ══════════════════════════════════════════ -->
+        <div class="page" id="page-settings">
+          <div class="page-title">Settings</div>
+          <div class="page-subtitle">Project configuration and API credentials</div>
+          <div style="max-width:600px">
+            <div class="settings-section">
+              <div class="settings-section-title">API Credentials</div>
+              <div style="margin-bottom:6px;font-size:13px;font-weight:500;color:var(--text)">Project API Key</div>
+              <div style="display:flex;gap:8px;margin-bottom:6px">
+                <input class="input" id="settings-api-key" readonly style="font-family:var(--mono);font-size:12px">
+                <button class="btn btn-secondary btn-sm" onclick="copyApiKey()">Copy</button>
+                <button class="btn btn-secondary btn-sm" onclick="rotateApiKey()" id="rotate-key-btn">Rotate</button>
+              </div>
+              <div style="font-size:12px;color:var(--text3)">
+                Authenticate as <span class="inline-code">X-Hermes-API-Key: &lt;key&gt;</span> or <span class="inline-code">Authorization: Bearer &lt;key&gt;</span>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <div class="settings-section-title">Webhook Ingestion</div>
+              <div style="margin-bottom:6px;font-size:13px;font-weight:500;color:var(--text)">Ingestion Endpoint</div>
+              <div style="display:flex;gap:8px;margin-bottom:6px">
+                <input class="input" id="settings-ingest-url" readonly style="font-family:var(--mono);font-size:12px" value="">
+                <button class="btn btn-secondary btn-sm" onclick="copyIngestUrl()">Copy</button>
+              </div>
+              <div style="font-size:12px;color:var(--text3)">
+                <span class="inline-code">POST</span> to this URL to ingest a webhook event. Include your API key in the header.
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <div class="settings-section-title">Danger Zone</div>
+              <div class="settings-danger-zone">
+                <div class="settings-danger-title">Delete Project</div>
+                <div class="settings-danger-desc">Permanently delete this project and all associated webhooks, destinations, and data. This action cannot be undone.</div>
+                <button class="btn btn-danger btn-sm" onclick="confirmDeleteProject()">Delete Project</button>
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- ── Settings page ── -->
-        <div class="page" id="page-settings">
-          <div class="page-title">Settings</div>
-          <div class="page-subtitle">Project configuration and API keys</div>
-          <div class="card" style="max-width:560px">
-            <div class="card-title" style="margin-bottom:16px">Project API Key</div>
-            <div style="display:flex;gap:8px">
-              <input class="input" id="settings-api-key" readonly>
-              <button class="btn btn-secondary btn-sm" onclick="copyApiKey()">Copy</button>
+        <!-- ══════════════════════════════════════════
+             DLQ Intelligence page
+             ══════════════════════════════════════════ -->
+        <div class="page" id="page-dlq-intelligence">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+            <div>
+              <div class="page-title">DLQ Intelligence</div>
+              <div class="page-subtitle" style="margin-bottom:0">Failure classification, incident management, and root cause analysis</div>
             </div>
-            <div style="font-size:12px;color:var(--text3);margin-top:8px">Use this key as <span class="inline-code">X-Hermes-API-Key</span> header or Bearer token.</div>
+            <button class="btn btn-secondary btn-sm" onclick="loadDLQIntelligence()">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
+              Refresh
+            </button>
+          </div>
+          <div id="dlq-loading" class="loading">Loading…</div>
+          <div id="dlq-error" class="dlq-error" style="display:none;"></div>
+          <div id="dlq-content" style="display:none;">
+            <!-- Health score row -->
+            <div class="dlq-health-row" id="health-score-circle">
+              <div class="dlq-score-block">
+                <span class="dlq-score-number" id="health-score-value">92</span>
+                <span class="dlq-score-label">/ 100</span>
+              </div>
+              <div class="dlq-score-bar-wrap">
+                <div class="dlq-score-bar" id="dlq-score-bar"></div>
+              </div>
+              <div class="dlq-score-status">
+                <span class="dlq-score-title" id="health-status">Healthy</span>
+                <span class="dlq-score-desc" id="health-description">Overall system health is good</span>
+              </div>
+              <div class="incident-summary">
+                <div class="incident-stat"><div class="incident-stat-value" id="total-incidents">0</div><div class="incident-stat-label">Incidents</div></div>
+                <div class="incident-stat"><div class="incident-stat-value" id="open-incidents">0</div><div class="incident-stat-label">Open</div></div>
+                <div class="incident-stat"><div class="incident-stat-value" id="critical-incidents">0</div><div class="incident-stat-label">Critical</div></div>
+                <div class="incident-stat"><div class="incident-stat-value" id="affected-destinations">0</div><div class="incident-stat-label">Affected</div></div>
+              </div>
+            </div>
+            <!-- Analysis grid: 3 columns -->
+            <div class="dlq-grid-3">
+              <div class="dashboard-card"><h3>Failure Breakdown</h3><div id="failure-breakdown" class="failure-breakdown"></div></div>
+              <div class="dashboard-card">
+                <h3>DLQ Growth Trend</h3>
+                <div id="trend-graph" class="trend-graph"></div>
+                <div class="trend-state-label">Trend: <span id="trend-state" class="trend-state-value">STABLE</span></div>
+              </div>
+              <div class="dashboard-card"><h3>Top Failing Destinations</h3><div id="top-destinations"></div></div>
+            </div>
+            <!-- Root causes + active incidents full-width -->
+            <div class="dlq-grid-2" style="margin-top:16px">
+              <div class="dashboard-card"><h3>Root Cause Analysis</h3><div id="root-causes"></div></div>
+              <div class="dashboard-card"><h3>Active Incidents</h3><div id="active-incidents"></div></div>
+            </div>
           </div>
         </div>
 
@@ -359,13 +665,18 @@
             <div style="font-size:13px;font-weight:600" id="panel-webhook-id">—</div>
             <div style="font-size:11px;color:var(--text3);margin-top:2px" id="panel-created-at">—</div>
           </div>
-          <span class="panel-close" onclick="closePanel()">✕</span>
+          <button class="btn btn-ghost btn-sm" onclick="closePanel()" style="padding:4px 8px">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
         </div>
         <div class="panel-body">
           <div class="panel-section">
             <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
               <span id="panel-status-badge"></span>
-              <button class="btn btn-xs btn-secondary" id="panel-replay-btn" onclick="replaySelected()">↻ Replay</button>
+              <button class="btn btn-xs btn-secondary" id="panel-replay-btn" onclick="replaySelected()">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
+                Replay
+              </button>
             </div>
             <div class="kv-list">
               <div class="kv-row"><span class="kv-key">Destination</span><span class="kv-val" id="panel-dest-url"></span></div>
@@ -376,17 +687,14 @@
               <div class="kv-row"><span class="kv-key">Ordering Key</span><span class="kv-val" id="panel-ordering-key"></span></div>
             </div>
           </div>
-
           <div class="panel-section">
             <div class="panel-section-title">Payload</div>
             <div class="json-view" id="panel-payload"></div>
           </div>
-
           <div class="panel-section">
             <div class="panel-section-title">Delivery Attempts</div>
             <div class="timeline" id="panel-timeline"></div>
           </div>
-
           <div class="panel-section">
             <div class="panel-section-title">Inbound Headers</div>
             <div class="json-view" id="panel-headers"></div>
@@ -397,15 +705,13 @@
   </div><!-- /main-body -->
 </div><!-- /app -->
 
-<!-- ── Toast container ── -->
 <div id="toast-container"></div>
 
-<!-- ── Modals ── -->
+<!-- ══ Modals ══ -->
 
-<!-- New Project modal -->
 <div class="modal-overlay" id="modal-new-project">
   <div class="modal">
-    <div class="modal-header"><div class="modal-title">New Project</div><span class="panel-close" onclick="closeModal('modal-new-project')">✕</span></div>
+    <div class="modal-header"><div class="modal-title">New Project</div><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-new-project')" style="padding:4px 8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
     <div class="modal-body">
       <div class="input-group"><label class="input-label">Project Name</label><input class="input" id="new-project-name" placeholder="My App"></div>
     </div>
@@ -416,10 +722,9 @@
   </div>
 </div>
 
-<!-- New Destination modal -->
 <div class="modal-overlay" id="modal-dest">
   <div class="modal" style="max-width:680px">
-    <div class="modal-header"><div class="modal-title" id="dest-modal-title">New Destination</div><span class="panel-close" onclick="closeModal('modal-dest')">✕</span></div>
+    <div class="modal-header"><div class="modal-title" id="dest-modal-title">New Destination</div><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-dest')" style="padding:4px 8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
     <div class="modal-body">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
         <div class="input-group" style="grid-column:1/-1"><label class="input-label">Name *</label><input class="input" id="dest-name" placeholder="My App Webhook"></div>
@@ -433,7 +738,7 @@
           <label class="input-label">Transform Type</label>
           <select class="select" id="dest-transform-type" onchange="toggleTransformEditor()">
             <option value="none">None — deliver payload as-is</option>
-            <option value="json_map">JSON Field Map — rename/pick fields</option>
+            <option value="json_map">JSON Field Map — rename / pick fields</option>
             <option value="javascript">JavaScript — full transform function</option>
           </select>
         </div>
@@ -445,34 +750,30 @@
         </div>
         <div id="dest-transform-js-wrap" style="display:none;grid-column:1/-1">
           <div class="input-group">
-            <label class="input-label">JavaScript Transform <span style="color:var(--text3);font-weight:400">(receives <code>payload</code>, must return object)</span></label>
-            <textarea class="textarea code-editor" id="dest-transform-code" rows="8" placeholder="// Example: pick and rename fields&#10;return {&#10;  order_id: payload.data.object.id,&#10;  amount_cents: payload.data.object.amount,&#10;  customer: payload.data.object.customer&#10;};"></textarea>
+            <label class="input-label">JavaScript Transform</label>
+            <textarea class="textarea code-editor" id="dest-transform-code" rows="8" placeholder="return { order_id: payload.data.object.id, amount: payload.data.object.amount };"></textarea>
           </div>
-          <div style="font-size:12px;color:var(--warn);margin-top:-4px">⚠ Requires Deno installed in the worker container.</div>
+          <div style="font-size:12px;color:var(--warn);margin-top:-4px">Requires Deno in the worker container.</div>
         </div>
       </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal('modal-dest')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveDestination()">Save</button>
+      <button class="btn btn-primary" onclick="saveDestination()">Save Destination</button>
     </div>
   </div>
 </div>
 
-<!-- Destination SLA modal -->
 <div class="modal-overlay" id="modal-dest-sla">
   <div class="modal" style="max-width:560px">
-    <div class="modal-header"><div class="modal-title" id="sla-modal-title">Delivery SLA</div><span class="panel-close" onclick="closeModal('modal-dest-sla')">✕</span></div>
-    <div class="modal-body" id="sla-modal-body">
-      <div style="color:var(--text3);text-align:center;padding:32px">Loading…</div>
-    </div>
+    <div class="modal-header"><div class="modal-title" id="sla-modal-title">Delivery SLA</div><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-dest-sla')" style="padding:4px 8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+    <div class="modal-body" id="sla-modal-body"><div style="color:var(--text3);text-align:center;padding:32px">Loading…</div></div>
   </div>
 </div>
 
-<!-- New Alert modal -->
 <div class="modal-overlay" id="modal-alert">
   <div class="modal">
-    <div class="modal-header"><div class="modal-title">New Alert Channel</div><span class="panel-close" onclick="closeModal('modal-alert')">✕</span></div>
+    <div class="modal-header"><div class="modal-title">New Alert Channel</div><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-alert')" style="padding:4px 8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
     <div class="modal-body">
       <div class="input-group"><label class="input-label">Name</label><input class="input" id="alert-name" placeholder="#ops-alerts"></div>
       <div class="input-group">
@@ -501,10 +802,9 @@
   </div>
 </div>
 
-<!-- Invite member modal -->
 <div class="modal-overlay" id="modal-invite">
   <div class="modal">
-    <div class="modal-header"><div class="modal-title">Invite Team Member</div><span class="panel-close" onclick="closeModal('modal-invite')">✕</span></div>
+    <div class="modal-header"><div class="modal-title">Invite Team Member</div><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-invite')" style="padding:4px 8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
     <div class="modal-body">
       <div class="input-group"><label class="input-label">Email</label><input class="input" id="invite-email" placeholder="colleague@company.com"></div>
       <div class="input-group">
@@ -518,15 +818,14 @@
     </div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal('modal-invite')">Cancel</button>
-      <button class="btn btn-primary" onclick="inviteMember()">Invite</button>
+      <button class="btn btn-primary" onclick="inviteMember()">Send Invite</button>
     </div>
   </div>
 </div>
 
-<!-- Event type modal -->
 <div class="modal-overlay" id="modal-event-type">
   <div class="modal">
-    <div class="modal-header"><div class="modal-title">New Event Type</div><span class="panel-close" onclick="closeModal('modal-event-type')">✕</span></div>
+    <div class="modal-header"><div class="modal-title">New Event Type</div><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-event-type')" style="padding:4px 8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
     <div class="modal-body">
       <div class="input-group"><label class="input-label">Name *</label><input class="input" id="et-name" placeholder="payment.succeeded"></div>
       <div class="input-group"><label class="input-label">Description</label><input class="input" id="et-desc" placeholder="Fired when a payment succeeds"></div>

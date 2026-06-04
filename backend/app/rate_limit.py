@@ -16,8 +16,9 @@ async def check_rate_limit(
     request: Request,
     tenant_id: str,
     db: AsyncSession,
+    max_per_minute: int = 0,  # 0 = use settings.RATE_LIMIT_PER_MINUTE
 ) -> None:
-    max_per_minute = settings.RATE_LIMIT_PER_MINUTE
+    max_per_minute = max_per_minute or settings.RATE_LIMIT_PER_MINUTE
     max_tokens = float(max_per_minute)
     refill_rate = max_tokens / 60.0  # tokens per second
 

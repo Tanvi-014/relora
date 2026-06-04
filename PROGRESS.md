@@ -276,6 +276,211 @@ Currently auth is API-key based. Real SaaS needs login, projects, teams.
 
 ---
 
+## Phase 11 — Production Hardening & Dashboard Redesign ✅
+
+**Status: SHIPPED**
+**Date Completed: 2026-06-03**
+
+### Critical Bug Fixes
+- [x] **Async Anthropic client** — `ai_intelligence.py` was using `anthropic.Anthropic` (sync), blocking the event loop for every AI call. Fixed: `anthropic.AsyncAnthropic` + `await`
+- [x] **SSRF vulnerability in `update_destination`** — URL was never re-validated on update, allowing POST-creation redirection to internal IPs (169.254.x.x, localhost). Fixed: `validate_destination_url()` called on every PUT
+- [x] **Password validation** — register endpoint accepted empty strings. Fixed: 8-char minimum + email format check
+- [x] **Replay job crash recovery** — API process crash mid-replay left jobs stuck in `status='running'` forever. Fixed: startup scan resets jobs stuck >5 min
+- [x] **Pydantic destination models** — `create_destination` and `update_destination` used `Dict[str, Any]` with no validation. Fixed: `DestinationCreate` and `DestinationUpdate` Pydantic models with field constraints
+
+### Architecture
+- [x] **Router split** — `api_main.py` reduced from ~1900 lines to 103 lines. All endpoint handlers moved to `app/routers/`: `auth`, `projects`, `destinations`, `webhooks`, `alerts`, `event_types`, `ai_tools`, `dlq`, `simulator`, `consumer`, `system`
+- [x] **`/api/v1/dashboard` endpoint** — Single API call returns all Overview page data: success rate, P95 latency, DLQ depth, circuit breaker summary, active incidents, recent failures, hourly throughput sparkline
+
+### Dashboard Redesign
+- [x] **SVG navigation icons** — All emoji nav icons replaced with clean Heroicons-style SVGs. No more 📊📨🎯 template signals
+- [x] **Health banner** — Color-coded system status bar (green/amber/red) above the fold on every load
+- [x] **4 KPI cards** — Success Rate (24h), P95 Latency, DLQ Depth, Circuit Breakers — each color-coded by threshold
+- [x] **Active incidents section** — Surfaced from DLQ Intelligence directly on Overview; hidden when no incidents
+- [x] **Delivery throughput sparkline** — 24-bar stacked chart (delivered vs failed per hour), rendered in pure CSS/JS
+- [x] **Recent failures panel** — Last 8 DLQ items with failure category badge, truncated error, relative timestamp, and inline Replay button — one click from the homepage
+- [x] **Single dashboard call** — Overview now makes one `GET /api/v1/dashboard` instead of 3+ separate calls
+
+### Files modified
+- `backend/app/ai_intelligence.py` — async client fix
+- `backend/app/routers/` (11 new files) — router split
+- `backend/app/api_main.py` — 103-line entry point
+- `backend/app/schemas.py` — `DestinationCreate`, `DestinationUpdate` models
+- `frontend/index.html` — SVG icons, new Overview layout
+- `frontend/app.js` — `loadDashboard()`, `_renderHealthBanner()`, `_renderKPIs()`, `_renderIncidents()`, `_renderSparkline()`, `_renderRecentFailures()`
+- `frontend/style.css` — KPI cards, health banner, sparkline, incident rows, failure rows
+
+---
+
+## Phase 10 — Observability, Cloud Adapters & Critical Bug Fixes ✅
+
+**Status: SHIPPED**
+**Date Completed: 2026-06-03**
+
+### Bug Fixes:
+- [x] **Invalid PostgreSQL CLAIM_QUERY syntax** — Removed `WAIT FOR LOCKING row_lock_timeout_in_ms` (not valid SQL); replaced with `SET LOCAL lock_timeout = '5000ms'` executed before claim
+- [x] **Missing `response_body_compressed` column** — Added column to `DeliveryAttempt` model + Alembic migration 0008; previously caused worker crashes on any compressed response body
+- [x] **Filter operator precedence bug** — `>` was matching `>=` expressions (and `<` matching `<=`) because the regex didn't capture the operator; fixed by adding capture group so the exact matched operator is used directly
+- [x] **`_set_state` race condition** — Added `with_for_update()` to circuit breaker state transitions to prevent two workers simultaneously overwriting state
+- [x] **Confusing broadcast status** — Extracted `_final_status` / `can_retry` variables before the broadcast block; eliminated fragile inline ternary referencing variables only defined in the failure branch
+
+### New Features:
+- [x] **OpenTelemetry integration** (`telemetry.py`) — Opt-in distributed tracing + custom metrics (ingestion counter, delivery latency histogram, DLQ depth, circuit trip counter); gracefully disabled when `OTEL_EXPORTER_OTLP_ENDPOINT` is unset
+- [x] **Cloud event source adapters** (`event_sources.py`) — Three ingest translation endpoints:
+  - `POST /api/v1/sources/aws-sns` — AWS SNS notifications + automatic subscription confirmation handshake
+  - `POST /api/v1/sources/gcp-pubsub` — Google Cloud Pub/Sub push subscriptions (base64 data decoding)
+  - `POST /api/v1/sources/azure-event-grid` — Azure Event Grid (both schemas + validation handshake + optional shared secret)
+- [x] **DLQ archival endpoint** — `DELETE /api/v1/dlq/archive?older_than_days=30` with `dry_run` preview mode; cascade-deletes delivery attempts via FK
+- [x] **Enhanced Prometheus metrics** — `/metrics` now exports circuit breaker state counts (`closed/open/half_open`) and DLQ health score alongside existing webhook gauges
+
+### Files created/modified:
+- `backend/app/worker.py` — Fixed CLAIM_QUERY SQL, SET_LOCK_TIMEOUT, broadcast status, telemetry calls
+- `backend/app/circuit_breaker.py` — FOR UPDATE in `_set_state`, circuit trip telemetry
+- `backend/app/routing.py` — Regex captures operator group, eliminates re-scan loop
+- `backend/app/models.py` — `response_body_compressed` column on DeliveryAttempt
+- `backend/alembic/versions/20260603_0008_add_response_body_compressed.py` — Migration
+- `backend/app/telemetry.py` — New: OpenTelemetry setup + metric instruments
+- `backend/app/event_sources.py` — New: AWS SNS, GCP Pub/Sub, Azure Event Grid adapters
+- `backend/app/api_main.py` — DLQ archival endpoint, enhanced /metrics, telemetry startup, source router mount
+- `backend/requirements.txt` — Added `opentelemetry-sdk`, `opentelemetry-exporter-otlp-proto-grpc`
+
+---
+
+## Phase 9 — DLQ Intelligence System ✅
+
+**Status: SHIPPED & TESTED**
+**Date Completed: 2026-05-31**
+
+### What was built:
+- [x] **Failure Classification Engine** — Automatic classification of failures into categories, subcategories, severity, and recoverability
+- [x] **Root Cause Aggregation** — Grouping similar failures into incidents with automatic incident lifecycle management
+- [x] **DLQ Health Scoring** — 0-100 health score based on DLQ size, growth rate, age, diversity, success rate, and circuit state
+- [x] **Growth Analysis** — Tracking DLQ growth over 15m, 1h, 6h, 24h windows with trend classification
+- [x] **Destination Health Analysis** — Per-destination health reports with success rate, failure rate, circuit state, and recommendations
+- [x] **Actionable Recommendations** — Automatic remediation suggestions for each failure type
+- [x] **Incident Management** — Automatic incident creation, updates, and resolution based on failure patterns
+- [x] **Auto Incident Detection** — Background scheduler that automatically creates incidents when thresholds are exceeded
+- [x] **AI Analysis Endpoint** — Human-readable analysis of DLQ failures with recommendations
+- [x] **DLQ Intelligence Dashboard** — Dedicated UI showing health score, incidents, failure breakdown, trends, and root causes
+
+### Files created/modified:
+- `backend/app/models.py` — Added failure classification enums, Incident model, updated DeliveryAttempt with classification fields
+- `backend/app/failure_classifier.py` — Complete failure classification engine with pattern matching and recommendations
+- `backend/app/incident_engine.py` — Incident aggregation, lifecycle management, and root cause analysis
+- `backend/app/health_engine.py` — DLQ health scoring with multi-factor analysis
+- `backend/app/destination_health.py` — Per-destination health analysis and metrics
+- `backend/app/incident_scheduler.py` — Background scheduler for automatic incident detection based on thresholds
+- `backend/alembic/versions/20260531_0007_add_dlq_intelligence.py` — Database migration for new columns and incidents table
+- `backend/app/worker.py` — Updated to classify failures and create incidents on DLQ transition
+- `backend/app/api_main.py` — Added 8 new DLQ intelligence API endpoints and integrated incident scheduler
+- `frontend/dlq-intelligence.html` — Dedicated DLQ Intelligence dashboard UI
+- `frontend/dlq-intelligence.js` — JavaScript for DLQ Intelligence dashboard with real-time updates
+- `frontend/index.html` — Added navigation link to DLQ Intelligence page
+- `frontend/app.js` — Updated navigation handler for DLQ Intelligence page
+
+---
+
+## Phase 12 — UI Redesign: Design Audit & Full Rebuild ✅
+
+**Status: SHIPPED**
+**Date Completed: 2026-06-03**
+
+Complete visual redesign of the Hermes dashboard. The previous UI had patterns that signalled "AI-generated template" rather than a production-grade engineering tool.
+
+### Design audit findings:
+- Purple/indigo `#6366F1` accent on purple-tinted dark surfaces — the canonical "AI dashboard" colour stack
+- `linear-gradient` on every interactive element (buttons, logo, avatar, health circles, trend bars)
+- `transform: translateY(-2px)` hover lift on cards, buttons, and stat tiles
+- Coloured `box-shadow` glows on buttons and avatars
+- `backdrop-filter: blur` on modals
+- 16px border-radius on cards (consumer-app feel)
+- Button shimmer sweep `::before` pseudo-element animation
+- 140px gradient health circle with scale-on-hover animation
+- Uppercase + letter-spacing on every label (overused, defeats emphasis)
+- 2×2 card grid for AI tools (no reading order)
+- Destinations as a card grid (forces left-right card reading, not top-down scanning)
+- Page title 24px/700 (too large for a dense ops tool)
+
+### Phase 1 — Cosmetic pattern removal
+- [x] All `linear-gradient` removed: buttons, logo, avatar, health circles (5 states), health banner fills, trend bars, DLQ score card, refresh button
+- [x] Button shimmer sweep `::before` removed entirely
+- [x] All `transform: translateY` hover lifts removed: buttons, stat cards, incident stats, dashboard cards, health circle scale
+- [x] All coloured `box-shadow` (glow effects) removed
+- [x] `backdrop-filter: blur` removed from modal overlays
+- [x] `border-radius` reduced to 8px on all cards, modals, table wraps, KPI cards, auth card
+
+### Phase 2 — Typography and spacing
+- [x] Header height: 64px → 52px
+- [x] Sidebar width: 240px → 216px
+- [x] Page title: 24px/700 → 20px/600
+- [x] All `text-transform: uppercase; letter-spacing` removed from data labels — reserved for nav section labels only
+- [x] KPI value: 32px/700 → 28px/600 mono
+- [x] Table `th`: uppercase removed, weight 500
+- [x] Dashboard card `h3`: 18px → 13px
+- [x] Incident stat value: 36px → 28px mono
+- [x] Health banner dot: pulses only on DEGRADED/CRITICAL, not on healthy
+- [x] Page padding tightened: 32/36px → 24/28px
+
+### Phase 3 — Layout restructures
+- [x] **Destinations**: card grid replaced with a table (`STATUS / NAME / URL / RETRIES / CIRCUIT / actions`). Circuit breaker OPEN banner added at top of page.
+- [x] **AI Intelligence**: 2×2 card grid replaced with tabbed layout (Analyze / Suggest Filter / Suggest Transform), 40/60 input/result split panel per tab
+- [x] **DLQ Intelligence**: 140px gradient circle removed. Replaced with compact score row (`92 / 100`, 4px vertical bar, status text, 4 inline stat counters). Grid restructured to 3-column analysis + 2-column root cause/incidents.
+- [x] **Replay Jobs**: Side-by-side form/results replaced with top-bar form + full-width jobs table
+- [x] **Dashboard lower grid**: 50/50 → 3:2 (throughput chart wider than failure list)
+
+### Phase 4 — Components and JS wiring
+- [x] Skeleton shimmer CSS (correct use: on skeleton blocks, not on cards)
+- [x] Settings page rebuilt: API key + Ingestion Endpoint (auto-populated) + Danger Zone with delete
+- [x] AI tab switcher `switchAiTab()` wired
+- [x] Destinations JS rewritten to `renderDestTable()` with status dots, circuit text, action columns
+- [x] `updateHealthScore()` drives score bar and border-left signal instead of removed gradient circle
+- [x] Inline banner component (`.inline-banner--warn/danger/info`) for contextual alerts
+- [x] Pre-existing dead `getElementById` calls in `loadStats` given null guards
+
+### Colour palette swap
+- [x] Replaced entire purple-indigo palette with Stripe + Linear language:
+  - Background: `#0B0F14` (matte charcoal), surfaces: `#111827` / `#1C2636` / `#243248` (cool blue-slate, not purple-tinted)
+  - Text: `#F8FAFC` / `#94A3B8` / `#64748B` (slate scale, no purple cast)
+  - Accent: `#3B82F6` blue-500 — used only for: primary buttons, nav active, focus rings, key metrics
+  - Status colours unchanged: `#10B981` success, `#F59E0B` warn, `#EF4444` danger
+- [x] nginx cache headers changed from `immutable 7d` to `no-cache must-revalidate` for dev iteration
+
+### Known remaining gaps (not production blockers, but tracked)
+- ~~`frontend/dlq-intelligence.html` and `frontend/dlq-intelligence.js` are now orphaned~~ — deleted.
+- ~~`backend/app/schema_validator.py` and `backend/app/sse_hub.py` are untracked~~ — confirmed wired: `schema_validator` imported by `routers/webhooks.py` and `routers/event_types.py`; `sse_hub` imported by `worker.py` and `routers/system.py`.
+
+---
+
+## Production Readiness Tracker
+
+**Overall: 100% ✅**
+
+| Area | Status | Notes |
+|------|--------|-------|
+| Core delivery | ✅ | FIFO, SELECT FOR UPDATE SKIP LOCKED, adaptive retry |
+| Auth + multi-tenant | ✅ | httpOnly JWT, argon2, `timezone` import fix |
+| Circuit breaker | ✅ | FOR UPDATE on state transitions |
+| Rate limiting | ✅ | Postgres token-bucket, multi-replica safe |
+| Retry logic | ✅ | Standard Webhooks compliant, 429/Retry-After aware |
+| DLQ Intelligence | ✅ | Failure classification, incident lifecycle, health scoring |
+| Observability | ✅ | Prometheus + OTel, circuit trip counters |
+| Cloud adapters | ✅ | SNS, GCP Pub/Sub, Azure Event Grid |
+| Migrations | ✅ | Alembic, 8 migrations clean |
+| UI | ✅ | Stripe+Linear palette, flat design, table layouts |
+| CI — test suite | ✅ | 95/95 passing (fixed `test_alerts.py` after router split, fixed `timezone` import) |
+| Graceful shutdown | ✅ | Worker drains in-flight deliveries (35s window) before exit; `loop.add_signal_handler` |
+| SSE hub | ✅ | `get_running_loop()` replacing deprecated `get_event_loop()` |
+| Security headers | ✅ | `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `HSTS` via middleware |
+| Startup validation | ✅ | Refuses to start in production if JWT_SECRET is default or COOKIE_SECURE=false |
+| Request size limit | ✅ | 1 MB cap on ingest endpoint (HTTP 413 with clear message) |
+| TLS / HTTPS | ✅ | `nginx.prod.conf` with TLS, OCSP stapling, HSTS, /metrics IP allowlist |
+| Dead file cleanup | ✅ | `dlq-intelligence.html`, `dlq-intelligence.js` deleted; `schema_validator.py`/`sse_hub.py` confirmed wired |
+| `.env.example` | ✅ | `ALLOW_PRIVATE_DESTINATIONS=false`, full production checklist with `[PROD]` markers |
+| Billing enforcement | ✅ | `MONTHLY_EVENT_QUOTA` config; hard HTTP 429 cutoff at ingest when set; 0=unlimited for self-hosted |
+| Container ops | ✅ | Worker `stop_grace_period: 40s`; `FORCE_HTTPS`/`COOKIE_SECURE` env-driven in compose; real worker healthcheck |
+
+---
+
 ## Changelog
 
 | Date | Phase | Change |
@@ -310,3 +515,42 @@ Currently auth is API-key based. Real SaaS needs login, projects, teams.
 | 2026-05-29 | 8 | Switched from bcrypt to argon2 for password hashing to avoid 72-byte limit |
 | 2026-05-29 | 8 | Improved frontend error handling with content-type checking before JSON parsing |
 | 2026-05-29 | 8 | Fixed Docker container PYTHONPATH and permission issues |
+| 2026-05-31 | 9 | Added failure classification enums and Incident model to database schema |
+| 2026-05-31 | 9 | Created failure classifier engine with pattern matching and recommendations |
+| 2026-05-31 | 9 | Implemented incident aggregation and lifecycle management engine |
+| 2026-05-31 | 9 | Created DLQ health scoring engine with multi-factor analysis (0-100 score) |
+| 2026-05-31 | 9 | Implemented growth analysis with trend classification (15m, 1h, 6h, 24h windows) |
+| 2026-05-31 | 9 | Created destination health analysis module with per-destination metrics |
+| 2026-05-31 | 9 | Updated worker to automatically classify failures and create incidents |
+| 2026-05-31 | 9 | Added 8 new DLQ intelligence API endpoints for health, incidents, classifications, trends, and root causes |
+| 2026-05-31 | 9 | Built dedicated DLQ Intelligence dashboard with health score, incidents, and root cause analysis |
+| 2026-05-31 | 9 | Created incident scheduler for automatic incident detection based on health, growth, and failure rate thresholds |
+| 2026-05-31 | 9 | Added AI analysis endpoint for human-readable DLQ failure analysis with recommendations |
+| 2026-06-03 | 10 | Fixed PostgreSQL CLAIM_QUERY syntax, response_body_compressed migration, filter regex, circuit breaker race condition |
+| 2026-06-03 | 10 | Added OpenTelemetry integration, AWS SNS / GCP Pub/Sub / Azure Event Grid adapters, DLQ archival endpoint |
+| 2026-06-03 | 11 | Router split: api_main.py reduced to 103 lines, 11 router modules created |
+| 2026-06-03 | 11 | Fixed async Anthropic client, SSRF in update_destination, password validation, replay crash recovery, Pydantic destination models |
+| 2026-06-03 | 11 | Built /api/v1/dashboard single-call endpoint for overview page |
+| 2026-06-03 | 12 | Full design audit: removed all gradients, hover lifts, coloured shadows, shimmer sweep, glassmorphism |
+| 2026-06-03 | 12 | Phase 2: typography scale, header 52px, sidebar 216px, page titles 20px/600, table headers cleaned |
+| 2026-06-03 | 12 | Phase 3: destinations table layout, AI Intelligence tabbed layout, DLQ Intelligence score row, Replay Jobs form bar |
+| 2026-06-03 | 12 | Phase 4: skeleton CSS, Settings page rebuilt (API key + ingestion URL + danger zone), AI tab switcher wired |
+| 2026-06-03 | 12 | Palette swap: indigo #6366F1 → electric blue #3B82F6, purple-tinted blacks → cool blue-slate (Stripe + Linear language) |
+| 2026-06-03 | 12 | nginx cache headers: immutable 7d → no-cache must-revalidate for dev iteration |
+| 2026-06-03 | 13 | Fixed CI: test_alerts.py rewritten to import from app.routers.alerts after router split |
+| 2026-06-03 | 13 | Fixed auth.py: missing `timezone` import caused login endpoint to 500 in production |
+| 2026-06-03 | 13 | Fixed worker graceful shutdown: stop() now drains in-flight deliveries (35s) before cancel |
+| 2026-06-03 | 13 | Fixed worker_main.py: loop.add_signal_handler replaces signal.signal for asyncio correctness |
+| 2026-06-03 | 13 | Fixed sse_hub.py: asyncio.get_running_loop() replaces deprecated get_event_loop() |
+| 2026-06-03 | 13 | Added startup config validation: API refuses to start in production with default JWT_SECRET |
+| 2026-06-03 | 13 | Added SecurityHeadersMiddleware: X-Content-Type-Options, X-Frame-Options, Referrer-Policy, HSTS |
+| 2026-06-03 | 13 | Added 1 MB body size limit on ingest endpoint (HTTP 413 on oversized payloads) |
+| 2026-06-03 | 13 | Created nginx.prod.conf: TLS 1.2/1.3, OCSP stapling, HSTS preload, /metrics IP allowlist |
+| 2026-06-04 | 14 | Added MONTHLY_EVENT_QUOTA config + hard 429 quota gate at ingest (0=unlimited, uses existing tenant/created_at index) |
+| 2026-06-04 | 14 | Fixed docker-compose: FORCE_HTTPS/COOKIE_SECURE were hardcoded false, now env-driven; MONTHLY_EVENT_QUOTA wired |
+| 2026-06-04 | 14 | Added stop_grace_period: 40s to worker service (covers the 35s drain window) |
+| 2026-06-04 | 14 | Fixed worker healthcheck: was always-pass no-op; now checks /proc/1/stat for zombie state |
+| 2026-06-04 | 14 | Confirmed schema_validator.py and sse_hub.py fully wired (routers/webhooks, routers/event_types, worker, routers/system) |
+| 2026-06-03 | 13 | Deleted orphaned dlq-intelligence.html and dlq-intelligence.js |
+| 2026-06-03 | 13 | Fixed .env.example: ALLOW_PRIVATE_DESTINATIONS=false, full [PROD] checklist |
+| 2026-06-03 | 13 | Test suite: 95/95 passing, 0 errors |

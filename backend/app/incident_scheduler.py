@@ -1,0 +1,346 @@
+"""
+Incident Scheduler for Hermes
+
+Automatically detects and creates incidents based on:
+- DLQ growth exceeding threshold
+- Health score dropping below threshold
+- Circuit breaker opening
+- Failure rate spikes
+
+Runs periodically to check system health and create incidents proactively.
+"""
+
+import asyncio
+import logging
+from datetime import datetime, timezone, timedelta
+from typing import Optional
+from uuid import UUID
+
+from sqlalchemy import select, func, and_
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import settings
+from app.db import async_session
+from app.health_engine import HealthEngine
+from app.incident_engine import IncidentEngine
+from app.models import (
+    Incident, IncidentState, Webhook, Destination, 
+    CircuitState, TrendState, FailureSeverity
+)
+
+configure_logging = None
+logger = logging.getLogger("hermes.incident_scheduler")
+
+
+class IncidentScheduler:
+    """Periodically checks system health and creates incidents automatically."""
+    
+    # Thresholds for automatic incident creation
+    DLQ_GROWTH_THRESHOLD_15M = 50  # events in 15 minutes
+    DLQ_GROWTH_THRESHOLD_1H = 200   # events in 1 hour
+    HEALTH_SCORE_THRESHOLD = 60      # health score below this triggers incident
+    FAILURE_RATE_THRESHOLD = 10      # 10% failure rate triggers incident
+    
+    def __init__(self):
+        self.running = False
+        self.task: Optional[asyncio.Task] = None
+    
+    async def start(self):
+        """Start the incident scheduler."""
+        if self.running:
+            return
+        
+        self.running = True
+        self.task = asyncio.create_task(self._run_scheduler())
+        logger.info("Incident scheduler started")
+    
+    async def stop(self):
+        """Stop the incident scheduler."""
+        self.running = False
+        if self.task:
+            self.task.cancel()
+            try:
+                await self.task
+            except asyncio.CancelledError:
+                pass
+        logger.info("Incident scheduler stopped")
+    
+    async def _run_scheduler(self):
+        """Main scheduler loop."""
+        while self.running:
+            try:
+                await self._check_system_health()
+                await self._auto_resolve_incidents()
+            except Exception as e:
+                logger.error(f"Error in incident scheduler: {e}")
+            
+            # Run every 5 minutes
+            await asyncio.sleep(300)
+    
+    async def _check_system_health(self):
+        """Check system health and create incidents if thresholds are exceeded."""
+        async with async_session() as db:
+            # Check health score for all projects
+            await self._check_health_scores(db)
+            
+            # Check DLQ growth rates
+            await self._check_dlq_growth(db)
+            
+            # Check circuit breaker states
+            await self._check_circuit_breakers(db)
+            
+            # Check failure rates
+            await self._check_failure_rates(db)
+    
+    async def _check_health_scores(self, db: AsyncSession):
+        """Check health scores and create incidents if below threshold."""
+        try:
+            # Get all projects
+            result = await db.execute(select(func.distinct(Webhook.project_id)).where(
+                Webhook.project_id.isnot(None)
+            ))
+            project_ids = result.scalars().all()
+            
+            for project_id in project_ids:
+                health_data = await HealthEngine.calculate_dlq_health_score(db, str(project_id))
+                
+                if health_data["overall_score"] < self.HEALTH_SCORE_THRESHOLD:
+                    # Check if there's already an incident for low health
+                    signature = f"low_health_{project_id}"
+                    
+                    existing = await db.execute(
+                        select(Incident).where(
+                            and_(
+                                Incident.project_id == project_id,
+                                Incident.incident_signature == signature,
+                                Incident.state == IncidentState.OPEN.value,
+                            )
+                        )
+                    )
+                    existing_incident = existing.scalar_one_or_none()
+                    
+                    if not existing_incident:
+                        # Create new incident for low health
+                        incident = Incident(
+                            id=UUID(),
+                            project_id=project_id,
+                            incident_signature=signature,
+                            state=IncidentState.OPEN.value,
+                            failure_category="SYSTEM_HEALTH",
+                            failure_subcategory="LOW_HEALTH_SCORE",
+                            root_cause=f"Overall health score dropped to {health_data['overall_score']}",
+                            affected_webhook_count=health_data["components"]["dlq_size"]["value"],
+                            first_seen_at=datetime.now(timezone.utc),
+                            last_seen_at=datetime.now(timezone.utc),
+                            trend_state=TrendState.STABLE.value,
+                            severity=FailureSeverity.HIGH.value if health_data["overall_score"] < 40 else FailureSeverity.MEDIUM.value,
+                            recoverability="manual",
+                            recommended_action="Investigate DLQ size, growth rate, and failure diversity",
+                            expected_recovery_difficulty="medium",
+                        )
+                        db.add(incident)
+                        await db.commit()
+                        logger.warning(f"Created incident for low health score in project {project_id}")
+        
+        except Exception as e:
+            logger.error(f"Error checking health scores: {e}")
+    
+    async def _check_dlq_growth(self, db: AsyncSession):
+        """Check DLQ growth rates and create incidents if thresholds exceeded."""
+        try:
+            now = datetime.now(timezone.utc)
+            
+            # Check 15-minute growth
+            fifteen_min_ago = now - timedelta(minutes=15)
+            result_15m = await db.execute(
+                select(
+                    Webhook.project_id,
+                    func.count(Webhook.id).label("count"),
+                ).where(
+                    and_(
+                        Webhook.status == "failed",
+                        Webhook.created_at >= fifteen_min_ago,
+                        Webhook.project_id.isnot(None),
+                    )
+                ).group_by(Webhook.project_id)
+            )
+            
+            for row in result_15m:
+                if row.count >= self.DLQ_GROWTH_THRESHOLD_15M:
+                    signature = f"dlq_growth_15m_{row.project_id}"
+                    
+                    existing = await db.execute(
+                        select(Incident).where(
+                            and_(
+                                Incident.project_id == row.project_id,
+                                Incident.incident_signature == signature,
+                                Incident.state == IncidentState.OPEN.value,
+                            )
+                        )
+                    )
+                    existing_incident = existing.scalar_one_or_none()
+                    
+                    if not existing_incident:
+                        incident = Incident(
+                            id=UUID(),
+                            project_id=row.project_id,
+                            incident_signature=signature,
+                            state=IncidentState.OPEN.value,
+                            failure_category="SYSTEM_HEALTH",
+                            failure_subcategory="RAPID_DLQ_GROWTH",
+                            root_cause=f"DLQ grew by {row.count} events in 15 minutes",
+                            affected_webhook_count=row.count,
+                            first_seen_at=datetime.now(timezone.utc),
+                            last_seen_at=datetime.now(timezone.utc),
+                            trend_state=TrendState.RAPID_GROWTH.value,
+                            severity=FailureSeverity.CRITICAL.value,
+                            recoverability="manual",
+                            recommended_action="Investigate root cause immediately - system is experiencing rapid failure accumulation",
+                            expected_recovery_difficulty="high",
+                        )
+                        db.add(incident)
+                        await db.commit()
+                        logger.warning(f"Created incident for rapid DLQ growth in project {row.project_id}")
+        
+        except Exception as e:
+            logger.error(f"Error checking DLQ growth: {e}")
+    
+    async def _check_circuit_breakers(self, db: AsyncSession):
+        """Check circuit breaker states and create incidents if any are open."""
+        try:
+            result = await db.execute(
+                select(Destination).where(
+                    Destination.circuit_state == CircuitState.OPEN.value
+                )
+            )
+            open_destinations = result.scalars().all()
+            
+            for dest in open_destinations:
+                signature = f"circuit_open_{dest.id}"
+                
+                existing = await db.execute(
+                    select(Incident).where(
+                        and_(
+                            Incident.project_id == dest.project_id,
+                            Incident.destination_id == dest.id,
+                            Incident.incident_signature == signature,
+                            Incident.state == IncidentState.OPEN.value,
+                        )
+                    )
+                )
+                existing_incident = existing.scalar_one_or_none()
+                
+                if not existing_incident:
+                    incident = Incident(
+                        id=UUID(),
+                        project_id=dest.project_id,
+                        destination_id=dest.id,
+                        incident_signature=signature,
+                        state=IncidentState.OPEN.value,
+                        failure_category="CIRCUIT_BREAKER",
+                        failure_subcategory="CIRCUIT_OPEN",
+                        root_cause=f"Circuit breaker opened for destination {dest.name}",
+                        affected_webhook_count=dest.circuit_failure_count,
+                        first_seen_at=dest.circuit_opened_at or datetime.now(timezone.utc),
+                        last_seen_at=datetime.now(timezone.utc),
+                        trend_state=TrendState.STABLE.value,
+                        severity=FailureSeverity.HIGH.value,
+                        recoverability="automatic",
+                        recommended_action="Wait for circuit to recover or investigate destination health",
+                        expected_recovery_difficulty="low",
+                    )
+                    db.add(incident)
+                    await db.commit()
+                    logger.warning(f"Created incident for open circuit breaker on destination {dest.name}")
+        
+        except Exception as e:
+            logger.error(f"Error checking circuit breakers: {e}")
+    
+    async def _check_failure_rates(self, db: AsyncSession):
+        """Check failure rates per destination and create incidents if thresholds exceeded."""
+        try:
+            # Calculate failure rate per destination
+            result = await db.execute(
+                select(
+                    Destination.id,
+                    Destination.project_id,
+                    Destination.name,
+                    func.count(Webhook.id).label("total"),
+                    func.sum(func.case((Webhook.status == "failed", 1), else_=0)).label("failed"),
+                ).join(
+                    Webhook, Destination.id == Webhook.destination_id
+                ).where(
+                    Webhook.destination_id.isnot(None)
+                ).group_by(Destination.id, Destination.project_id, Destination.name)
+            )
+            
+            for row in result:
+                total = row.total or 0
+                failed = row.failed or 0
+                
+                if total > 0:
+                    failure_rate = (failed / total) * 100
+                    
+                    if failure_rate >= self.FAILURE_RATE_THRESHOLD:
+                        signature = f"high_failure_rate_{row.id}"
+                        
+                        existing = await db.execute(
+                            select(Incident).where(
+                                and_(
+                                    Incident.project_id == row.project_id,
+                                    Incident.destination_id == row.id,
+                                    Incident.incident_signature == signature,
+                                    Incident.state == IncidentState.OPEN.value,
+                                )
+                            )
+                        )
+                        existing_incident = existing.scalar_one_or_none()
+                        
+                        if not existing_incident:
+                            incident = Incident(
+                                id=UUID(),
+                                project_id=row.project_id,
+                                destination_id=row.id,
+                                incident_signature=signature,
+                                state=IncidentState.OPEN.value,
+                                failure_category="SYSTEM_HEALTH",
+                                failure_subcategory="HIGH_FAILURE_RATE",
+                                root_cause=f"Failure rate {failure_rate:.1f}% exceeds threshold for destination {row.name}",
+                                affected_webhook_count=failed,
+                                first_seen_at=datetime.now(timezone.utc),
+                                last_seen_at=datetime.now(timezone.utc),
+                                trend_state=TrendState.STABLE.value,
+                                severity=FailureSeverity.HIGH.value,
+                                recoverability="manual",
+                                recommended_action="Investigate destination health and failure patterns",
+                                expected_recovery_difficulty="medium",
+                            )
+                            db.add(incident)
+                            await db.commit()
+                            logger.warning(f"Created incident for high failure rate on destination {row.name}")
+        
+        except Exception as e:
+            logger.error(f"Error checking failure rates: {e}")
+    
+    async def _auto_resolve_incidents(self):
+        """Automatically resolve incidents that have recovered."""
+        try:
+            async with async_session() as db:
+                await IncidentEngine.auto_resolve_incidents(db)
+                logger.info("Auto-resolved recovered incidents")
+        except Exception as e:
+            logger.error(f"Error auto-resolving incidents: {e}")
+
+
+# Global scheduler instance
+incident_scheduler = IncidentScheduler()
+
+
+async def start_incident_scheduler():
+    """Start the incident scheduler (called from main.py)."""
+    await incident_scheduler.start()
+
+
+async def stop_incident_scheduler():
+    """Stop the incident scheduler (called from main.py)."""
+    await incident_scheduler.stop()

@@ -47,6 +47,38 @@ class DashboardStats(BaseModel):
     success_rate: float
 
 
+class DestinationCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    url: str = Field(..., min_length=8)
+    description: Optional[str] = None
+    is_enabled: bool = True
+    max_retries: int = Field(5, ge=0, le=100)
+    backoff_base_seconds: int = Field(30, ge=1, le=86400)
+    ordering_key_field: Optional[str] = None
+    transform_type: str = Field("none", pattern="^(none|json_map|javascript)$")
+    transform_code: Optional[str] = None
+    transform_map: Optional[Dict[str, Any]] = None
+    filter_expression: Optional[str] = Field(None, max_length=500)
+    webhook_secret: Optional[str] = None
+    custom_headers: Dict[str, str] = Field(default_factory=dict)
+
+
+class DestinationUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    url: Optional[str] = None
+    description: Optional[str] = None
+    is_enabled: Optional[bool] = None
+    max_retries: Optional[int] = Field(None, ge=0, le=100)
+    backoff_base_seconds: Optional[int] = Field(None, ge=1, le=86400)
+    ordering_key_field: Optional[str] = None
+    transform_type: Optional[str] = Field(None, pattern="^(none|json_map|javascript)$")
+    transform_code: Optional[str] = None
+    transform_map: Optional[Dict[str, Any]] = None
+    filter_expression: Optional[str] = Field(None, max_length=500)
+    webhook_secret: Optional[str] = None
+    custom_headers: Optional[Dict[str, str]] = None
+
+
 class AlertConfigCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     channel_type: str = Field(..., pattern="^(slack|email)$")

@@ -11,3 +11,7 @@ passlib[argon2]>=1.7.4
 python-multipart>=0.0.9
 websockets>=12.0
 anthropic>=0.25.0
+jsonschema>=4.20.0
+# OpenTelemetry — optional; set OTEL_EXPORTER_OTLP_ENDPOINT to activate
+opentelemetry-sdk>=1.24.0
+opentelemetry-exporter-otlp-proto-grpc>=1.24.0

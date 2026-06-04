@@ -29,17 +29,28 @@ async def main():
     })
 
     stop_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
 
-    def _shutdown(sig, frame):
-        logger.info("Shutdown signal received (%s), stopping workers...", sig)
+    def _shutdown(sig_num: int) -> None:
+        logger.info(
+            "Shutdown signal received (%s), draining workers…",
+            signal.Signals(sig_num).name,
+            extra={"event": "worker_main.shutdown_requested"},
+        )
         stop_event.set()
 
-    signal.signal(signal.SIGTERM, _shutdown)
-    signal.signal(signal.SIGINT, _shutdown)
+    # loop.add_signal_handler integrates correctly with asyncio on Linux/macOS.
+    # Fallback to signal.signal for Windows local-dev only.
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, _shutdown, sig)
+        except (NotImplementedError, OSError):
+            signal.signal(sig, lambda s, f: _shutdown(s))
 
     await stop_event.wait()
+    logger.info("Draining in-flight deliveries (up to 35s per worker)…")
     await pool.stop()
-    logger.info("Worker process exited cleanly.")
+    logger.info("Worker process exited cleanly.", extra={"event": "worker_main.stopped"})
 
 
 if __name__ == "__main__":

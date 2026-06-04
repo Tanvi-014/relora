@@ -7,7 +7,7 @@ from fastapi import HTTPException, status
 
 
 FILTER_RE = re.compile(
-    r"^\s*([A-Za-z0-9_.@-]+)\s*(?:==|!=|>=|<=|>|<)\s*['\"]?([^'\"]+)['\"]?\s*$"
+    r"^\s*([A-Za-z0-9_.@-]+)\s*(==|!=|>=|<=|>|<)\s*['\"]?([^'\"]+)['\"]?\s*$"
 )
 
 OPERATORS = {
@@ -41,7 +41,17 @@ def extract_event_id(payload: Any, explicit_event_id: Optional[str] = None) -> s
     if explicit_event_id:
         return explicit_event_id
     if isinstance(payload, dict):
-        for path in ("event_id", "event.id", "id"):
+        # Optimized path: check common event ID locations without creating new strings
+        # Check top-level first (most common case)
+        if "event_id" in payload:
+            return str(payload["event_id"])
+        if "id" in payload:
+            return str(payload["id"])
+        # Check nested event.id
+        if isinstance(payload.get("event"), dict) and "id" in payload["event"]:
+            return str(payload["event"]["id"])
+        # Fallback for less common cases
+        for path in ("event.id",):  # Only check the remaining uncommon paths
             value = get_path(payload, path)
             if value:
                 return str(value)
@@ -52,7 +62,6 @@ def event_matches_filter(payload: Any, filter_expression: Optional[str]) -> bool
     if not filter_expression:
         return True
 
-    # Try the regex matcher
     match = FILTER_RE.match(filter_expression)
     if not match:
         raise HTTPException(
@@ -60,15 +69,12 @@ def event_matches_filter(payload: Any, filter_expression: Optional[str]) -> bool
             detail="Filter must be like: event.type == 'payment.succeeded'",
         )
 
-    path, expected = match.groups()
+    path, op_str, expected = match.groups()
     actual = get_path(payload, path)
-
-    # Detect which operator was used
-    for op_str, op_fn in OPERATORS.items():
-        if op_str in filter_expression:
-            return op_fn(actual, expected.strip())
-
-    return str(actual) == expected.strip()
+    op_fn = OPERATORS.get(op_str)
+    if op_fn is None:
+        return str(actual) == expected.strip()
+    return op_fn(actual, expected.strip())
 
 
 def apply_json_map(payload: Any, mapping: Dict[str, str]) -> Dict[str, Any]:

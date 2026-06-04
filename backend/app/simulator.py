@@ -193,7 +193,7 @@ def _fill_template(obj: Any) -> Any:
     ts_now = int(time.time())
     ts_future = ts_now + 30 * 24 * 3600
     import datetime
-    ts_iso = datetime.datetime.utcnow().isoformat() + "Z"
+    ts_iso = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
 
     if isinstance(obj, str):
         return (

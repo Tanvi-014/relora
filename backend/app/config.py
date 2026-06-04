@@ -45,6 +45,18 @@ class Settings(BaseSettings):
     # Production
     FORCE_HTTPS: bool = False
     RATE_LIMIT_PER_MINUTE: int = 60
+    # Auth endpoint rate limit — stricter than ingest (per-IP, per minute)
+    AUTH_RATE_LIMIT_PER_MINUTE: int = 10
+    # Per-tenant monthly event quota. 0 = unlimited (self-hosted default).
+    MONTHLY_EVENT_QUOTA: int = 0
+
+    # CORS — comma-separated list of allowed origins.
+    # Leave empty (default) when frontend and API are co-served (nginx reverse proxy).
+    # Set to e.g. "https://app.example.com,https://staging.example.com" when the
+    # dashboard is on a different domain than the API.
+    # WARNING: never use "*" with allow_credentials=True — it violates the CORS spec
+    # and browsers will reject credentialed requests silently.
+    CORS_ORIGINS: str = ""
 
     # Schema management — NEVER True in production
     AUTO_CREATE_TABLES: bool = False
@@ -67,6 +79,10 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "production"
+
+    @property
+    def cors_origins(self) -> List[str]:
+        return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 
     @property
     def destination_host_allowlist(self) -> List[str]:

@@ -16,6 +16,37 @@ HALF_OPEN_TIMEOUT = 5        # minutes to wait before probing
 SUCCESS_TO_CLOSE = 2         # successes in half_open to re-close
 
 
+class CircuitExpireWrapper:
+    """Wrapper to ensure circuit states reset properly on timeout."""
+
+    def __init__(self, destination_id: UUID):
+        self.destination_id = destination_id
+        self.last_check_time = None
+
+    async def check_expiry(self, db: AsyncSession) -> bool:
+        """Check if circuit should be expired/reset. Returns True if expired."""
+        from app.models import Destination
+        result = await db.execute(
+            select(Destination).where(Destination.id == self.destination_id)
+        )
+        dest = result.scalar_one_or_none()
+
+        if not dest:
+            return True
+
+        now = datetime.now(timezone.utc)
+
+        # If circuit has been open for more than 30 minutes, force reset
+        if dest.circuit_state == "open" and dest.circuit_opened_at:
+            if (now - dest.circuit_opened_at) > timedelta(minutes=30):
+                logger.info("Circuit timeout forcing reset for destination %s", self.destination_id)
+                await _set_state(db, self.destination_id, "closed")
+                return True
+
+        self.last_check_time = now
+        return False
+
+
 async def should_deliver(db: AsyncSession, destination_id: UUID) -> bool:
     """Returns False if circuit is OPEN and cooldown not elapsed."""
     from app.models import Destination
@@ -66,6 +97,11 @@ async def record_outcome(db: AsyncSession, destination_id: UUID, success: bool) 
                 "Circuit OPENED for destination %s after %d failures",
                 destination_id, dest.circuit_failure_count,
             )
+            try:
+                from app.telemetry import record_circuit_trip
+                record_circuit_trip(str(destination_id))
+            except Exception:
+                pass
 
     dest.updated_at = now
     await db.commit()
@@ -73,7 +109,9 @@ async def record_outcome(db: AsyncSession, destination_id: UUID, success: bool) 
 
 async def _set_state(db: AsyncSession, destination_id: UUID, state: str) -> None:
     from app.models import Destination
-    result = await db.execute(select(Destination).where(Destination.id == destination_id))
+    result = await db.execute(
+        select(Destination).where(Destination.id == destination_id).with_for_update()
+    )
     dest = result.scalar_one_or_none()
     if dest:
         dest.circuit_state = state

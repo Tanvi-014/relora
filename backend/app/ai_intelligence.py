@@ -44,8 +44,8 @@ async def analyze_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         return _empty_analysis()
     try:
         import anthropic
-        client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-        response = client.messages.create(
+        client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+        response = await client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=1024,
             system=_SYSTEM_ANALYZE,
@@ -65,8 +65,8 @@ async def suggest_filter(description: str, sample_payload: Dict[str, Any]) -> st
         return ""
     try:
         import anthropic
-        client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-        response = client.messages.create(
+        client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+        response = await client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=200,
             system=_SYSTEM_FILTER,
@@ -89,8 +89,8 @@ async def suggest_transform(description: str, sample_payload: Dict[str, Any]) ->
         return ""
     try:
         import anthropic
-        client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-        response = client.messages.create(
+        client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+        response = await client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=512,
             system=_SYSTEM_TRANSFORM,
