@@ -1,6 +1,6 @@
 """
 Authentication — JWT tokens, password hashing, project role enforcement.
-JWT is delivered via httpOnly cookie (hermes_session) or Authorization: Bearer header.
+JWT is delivered via httpOnly cookie (relora_session) or Authorization: Bearer header.
 """
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -58,7 +58,7 @@ def _extract_token(request: Request) -> Optional[str]:
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
         return auth[7:]
-    return request.cookies.get("hermes_session")
+    return request.cookies.get("relora_session")
 
 
 async def get_current_user(
@@ -154,12 +154,12 @@ async def require_api_key(request: Request) -> str:
     tenants = settings.api_key_tenants
     if not tenants:
         return "anonymous"
-    key = request.headers.get("X-Hermes-API-Key", "")
+    key = request.headers.get("X-Relora-API-Key", "")
     tenant_id = tenants.get(key)
     if not tenant_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid X-Hermes-API-Key",
+            detail="Missing or invalid X-Relora-API-Key",
         )
     return tenant_id
 
@@ -169,7 +169,7 @@ async def get_tenant_from_auth(
     db: AsyncSession = Depends(get_db),
 ) -> str:
     """
-    Resolves tenant_id from JWT (SaaS) or X-Hermes-API-Key (legacy).
+    Resolves tenant_id from JWT (SaaS) or X-Relora-API-Key (legacy).
     For JWT users: returns the project API key scoped to the active project.
     Falls back to 'anonymous' if no auth configured.
     """
@@ -209,14 +209,14 @@ async def get_tenant_from_auth(
                     if p:
                         return p.api_key
 
-    # Check if X-Hermes-API-Key is a real project api_key in the database.
+    # Check if X-Relora-API-Key is a real project api_key in the database.
     # This path is used by programmatic clients (SDKs, curl) that pass the
-    # project key directly without going through HERMES_API_KEYS config.
-    header_key = request.headers.get("X-Hermes-API-Key", "")
+    # project key directly without going through RELORA_API_KEYS config.
+    header_key = request.headers.get("X-Relora-API-Key", "")
     if header_key:
         pr = await db.execute(select(Project).where(Project.api_key == header_key))
         if pr.scalar_one_or_none():
             return header_key  # valid project key — use it as tenant_id directly
 
-    # Fall back to legacy pre-shared key config (HERMES_API_KEYS env var)
+    # Fall back to legacy pre-shared key config (RELORA_API_KEYS env var)
     return await require_api_key(request)

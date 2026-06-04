@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import SchemaChange, SchemaFingerprint
 
-logger = logging.getLogger("hermes.schema_drift")
+logger = logging.getLogger("relora.schema_drift")
 
 _MAX_DEPTH = 4          # how deep to traverse nested objects
 _MAX_SAMPLE_KEYS = 64   # cap key count to avoid huge fingerprints

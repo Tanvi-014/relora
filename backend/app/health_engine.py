@@ -1,5 +1,5 @@
 """
-DLQ Health Scoring Engine for Hermes
+DLQ Health Scoring Engine for Relora
 
 Calculates a health score between 0-100 based on multiple factors:
 - DLQ Size

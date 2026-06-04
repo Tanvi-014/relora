@@ -1,21 +1,21 @@
-# GitHub Webhook Integration with Hermes
+# GitHub Webhook Integration with Relora
 
-This guide shows how to forward GitHub webhooks through Hermes for reliable delivery and retry handling.
+This guide shows how to forward GitHub webhooks through Relora for reliable delivery and retry handling.
 
 ## Prerequisites
 
-- Hermes instance running (local or deployed)
+- Relora instance running (local or deployed)
 - GitHub account
 - A GitHub repository
 
-## Step 1: Get Your Hermes URL
+## Step 1: Get Your Relora URL
 
 If running locally: `http://localhost:8000` (use ngrok for external access)
-If deployed: Use your deployed URL (e.g., `https://hermes.yourdomain.com`)
+If deployed: Use your deployed URL (e.g., `https://relora.yourdomain.com`)
 
-## Step 2: Configure Hermes for GitHub
+## Step 2: Configure Relora for GitHub
 
-Hermes supports GitHub signature verification out of the box. Set your GitHub webhook secret:
+Relora supports GitHub signature verification out of the box. Set your GitHub webhook secret:
 
 ```bash
 # Set the GitHub webhook secret in your environment
@@ -34,9 +34,9 @@ GITHUB_WEBHOOK_SECRET=your_github_webhook_secret_here
 1. Go to your GitHub repository
 2. Navigate to Settings → Webhooks
 3. Click "Add webhook"
-4. Set Payload URL to: `https://your-hermes-url.com/api/v1/ingest?signature_provider=github&url=https://your-downstream-url.com/webhook`
+4. Set Payload URL to: `https://your-relora-url.com/api/v1/ingest?signature_provider=github&url=https://your-downstream-url.com/webhook`
 5. Content type: `application/json`
-6. Secret: Enter a secret (you'll need to set this in Hermes too)
+6. Secret: Enter a secret (you'll need to set this in Relora too)
 7. Select events to trigger:
    - Push events
    - Pull request events
@@ -44,14 +44,14 @@ GITHUB_WEBHOOK_SECRET=your_github_webhook_secret_here
    - Or select "Send me everything"
 8. Click "Add webhook"
 9. Copy the webhook secret
-10. Set the secret in Hermes configuration (Step 2)
+10. Set the secret in Relora configuration (Step 2)
 
 ### Using GitHub CLI
 
 ```bash
 # Add webhook to repository
 gh webhook create --repo your-org/your-repo \
-  --url "https://your-hermes-url.com/api/v1/ingest?signature_provider=github&url=https://downstream.com/webhook" \
+  --url "https://your-relora-url.com/api/v1/ingest?signature_provider=github&url=https://downstream.com/webhook" \
   --secret your_webhook_secret \
   --events push,pull_request,issues
 ```
@@ -59,7 +59,7 @@ gh webhook create --repo your-org/your-repo \
 ## Step 4: Verify Integration
 
 1. Make a change to your repository (push, create PR, etc.)
-2. Check Hermes dashboard at `/` to see the webhook in the queue
+2. Check Relora dashboard at `/` to see the webhook in the queue
 3. Verify the webhook was delivered to your downstream URL
 4. Check delivery attempts and status in the webhook details panel
 
@@ -68,7 +68,7 @@ gh webhook create --repo your-org/your-repo \
 Forward GitHub events to multiple downstream URLs:
 
 ```
-https://your-hermes-url.com/api/v1/ingest?signature_provider=github&url=https://analytics.example.com/webhook&urls=https://slack.example.com/webhook,https://email.example.com/webhook
+https://your-relora-url.com/api/v1/ingest?signature_provider=github&url=https://analytics.example.com/webhook&urls=https://slack.example.com/webhook,https://email.example.com/webhook
 ```
 
 ## Example: Filter GitHub Events
@@ -77,10 +77,10 @@ Only forward specific event types:
 
 ```
 # Only push events to main branch
-https://your-hermes-url.com/api/v1/ingest?signature_provider=github&url=https://downstream.com/webhook&filter=ref=='refs/heads/main'
+https://your-relora-url.com/api/v1/ingest?signature_provider=github&url=https://downstream.com/webhook&filter=ref=='refs/heads/main'
 
 # Only pull request events
-https://your-hermes-url.com/api/v1/ingest?signature_provider=github&url=https://downstream.com/webhook&filter=event_type=='pull_request'
+https://your-relora-url.com/api/v1/ingest?signature_provider=github&url=https://downstream.com/webhook&filter=event_type=='pull_request'
 ```
 
 ## Example: Transform GitHub Payload
@@ -89,10 +89,10 @@ Extract specific fields from GitHub events:
 
 ```
 # Extract repository name and action
-https://your-hermes-url.com/api/v1/ingest?signature_provider=github&url=https://downstream.com/webhook&transform={"repo":"repository.name","action":"action","sender":"sender.login"}
+https://your-relora-url.com/api/v1/ingest?signature_provider=github&url=https://downstream.com/webhook&transform={"repo":"repository.name","action":"action","sender":"sender.login"}
 
 # Extract PR information
-https://your-hermes-url.com/api/v1/ingest?signature_provider=github&url=https://downstream.com/webhook&transform={"pr_number":"pull_request.number","title":"pull_request.title","state":"pull_request.state"}
+https://your-relora-url.com/api/v1/ingest?signature_provider=github&url=https://downstream.com/webhook&transform={"pr_number":"pull_request.number","title":"pull_request.title","state":"pull_request.state"}
 ```
 
 ## Common Use Cases
@@ -102,7 +102,7 @@ https://your-hermes-url.com/api/v1/ingest?signature_provider=github&url=https://
 Forward GitHub events to your CI/CD system:
 
 ```
-https://your-hermes-url.com/api/v1/ingest?signature_provider=github&url=https://ci.example.com/github-webhook
+https://your-relora-url.com/api/v1/ingest?signature_provider=github&url=https://ci.example.com/github-webhook
 ```
 
 ### Slack Notifications
@@ -110,7 +110,7 @@ https://your-hermes-url.com/api/v1/ingest?signature_provider=github&url=https://
 Send GitHub events to Slack:
 
 ```
-https://your-hermes-url.com/api/v1/ingest?signature_provider=github&url=https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK
+https://your-relora-url.com/api/v1/ingest?signature_provider=github&url=https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK
 ```
 
 ### Analytics Pipeline
@@ -118,10 +118,10 @@ https://your-hermes-url.com/api/v1/ingest?signature_provider=github&url=https://
 Send GitHub events to your analytics system:
 
 ```
-https://your-hermes-url.com/api/v1/ingest?signature_provider=github&url=https://analytics.example.com/github-events
+https://your-relora-url.com/api/v1/ingest?signature_provider=github&url=https://analytics.example.com/github-events
 ```
 
-## Benefits of Using Hermes with GitHub
+## Benefits of Using Relora with GitHub
 
 - **Reliability**: Automatic retry with exponential backoff
 - **Visibility**: Dashboard to track all webhook deliveries
@@ -135,20 +135,20 @@ https://your-hermes-url.com/api/v1/ingest?signature_provider=github&url=https://
 
 ### Signature Verification Failed
 
-- Ensure `GITHUB_WEBHOOK_SECRET` is set correctly in Hermes
+- Ensure `GITHUB_WEBHOOK_SECRET` is set correctly in Relora
 - Check that the webhook secret matches the one in GitHub repository settings
 - Verify the event is being sent with the correct signature
 
 ### Webhooks Not Delivering
 
-- Check Hermes dashboard for webhook status
+- Check Relora dashboard for webhook status
 - Verify downstream URL is accessible
 - Check destination URL allowlist if `ALLOW_PRIVATE_DESTINATIONS=false`
 - Review delivery attempts in webhook details panel
 
 ### Local Development with ngrok
 
-For local development, use ngrok to expose your local Hermes instance:
+For local development, use ngrok to expose your local Relora instance:
 
 ```bash
 # Start ngrok
@@ -160,4 +160,4 @@ ngrok http 8000
 
 ### Rate Limiting
 
-If you're hitting rate limits, adjust `RATE_LIMIT_PER_MINUTE` in Hermes configuration.
+If you're hitting rate limits, adjust `RATE_LIMIT_PER_MINUTE` in Relora configuration.

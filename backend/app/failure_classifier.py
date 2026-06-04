@@ -1,5 +1,5 @@
 """
-Failure Classification Engine for Hermes
+Failure Classification Engine for Relora
 
 Analyzes delivery attempt failures and classifies them into:
 - Category (e.g., AUTHENTICATION, NETWORK, TIMEOUT)

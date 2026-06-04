@@ -147,10 +147,10 @@ async def test_destination(
 ):
     dest = await _get_dest_for_tenant(db, dest_id, tenant_id)
     import httpx as _httpx
-    test_payload = {"event": "test", "source": "hermes", "destination_id": str(dest_id)}
+    test_payload = {"event": "test", "source": "relora", "destination_id": str(dest_id)}
     try:
         async with _httpx.AsyncClient(timeout=10) as client:
-            r = await client.post(dest.url, json=test_payload, headers={"X-Hermes-Test": "true"})
+            r = await client.post(dest.url, json=test_payload, headers={"X-Relora-Test": "true"})
         return {"success": 200 <= r.status_code < 300, "status_code": r.status_code, "body": r.text[:500]}
     except Exception as exc:
         return {"success": False, "error": str(exc)}

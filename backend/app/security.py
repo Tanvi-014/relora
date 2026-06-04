@@ -17,12 +17,12 @@ async def require_api_key(request: Request) -> str:
     if not tenants:
         return "anonymous"
 
-    supplied_key = request.headers.get("X-Hermes-API-Key")
+    supplied_key = request.headers.get("X-Relora-API-Key")
     tenant_id = tenants.get(supplied_key or "")
     if not tenant_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid Hermes API key",
+            detail="Missing or invalid Relora API key",
         )
     return tenant_id
 

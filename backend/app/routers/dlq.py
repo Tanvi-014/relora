@@ -15,7 +15,7 @@ from app.health_engine import HealthEngine
 from app.incident_engine import IncidentEngine
 from app.models import DeliveryAttempt, Destination, Incident, Project, Webhook
 
-logger = logging.getLogger("hermes.api")
+logger = logging.getLogger("relora.api")
 
 router = APIRouter()
 

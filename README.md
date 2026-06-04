@@ -1,16 +1,16 @@
-# Hermes
+# Relora
 
 Self-hosted webhook delivery middleware. Postgres-only. No Redis. No Kafka.
 
-Hermes sits between webhook publishers (Stripe, GitHub, Shopify, your internal services) and your application. It accepts events instantly, stores them durably in PostgreSQL, and delivers them reliably with exponential retry, circuit breaking, fan-out routing, and a full DLQ intelligence layer — the stuff every team builds from scratch and never quite finishes.
+Relora sits between webhook publishers (Stripe, GitHub, Shopify, your internal services) and your application. It accepts events instantly, stores them durably in PostgreSQL, and delivers them reliably with exponential retry, circuit breaking, fan-out routing, and a full DLQ intelligence layer — the stuff every team builds from scratch and never quite finishes.
 
 ---
 
-## Why Hermes over rolling your own
+## Why Relora over rolling your own
 
-Most teams write a Celery task or an SQS consumer and call it a webhook handler. Three months later it has no circuit breaker, no DLQ visibility, no replay, and the retry logic resets on every deploy. Hermes replaces that entirely:
+Most teams write a Celery task or an SQS consumer and call it a webhook handler. Three months later it has no circuit breaker, no DLQ visibility, no replay, and the retry logic resets on every deploy. Relora replaces that entirely:
 
-| Feature | DIY queue | Hermes |
+| Feature | DIY queue | Relora |
 |---|---|---|
 | Durable storage | depends | PostgreSQL — same DB you already have |
 | Concurrent delivery | sometimes | `SELECT FOR UPDATE SKIP LOCKED` |
@@ -25,7 +25,7 @@ Most teams write a Celery task or an SQS consumer and call it a webhook handler.
 | Dashboard | never | ✅ built-in |
 | Multi-tenant | never | ✅ JWT + API key |
 
-## Why Hermes over Hookdeck / Svix (hosted services)
+## Why Relora over Hookdeck / Svix (hosted services)
 
 - **No per-event pricing.** Flat infra cost. At 10 M events/month the difference is real.
 - **Data never leaves your infrastructure.** Required for healthcare, fintech, EU data residency.
@@ -39,8 +39,8 @@ Most teams write a Celery task or an SQS consumer and call it a webhook handler.
 **Prerequisites:** Docker, Docker Compose
 
 ```bash
-git clone https://github.com/your-org/hermes
-cd hermes
+git clone https://github.com/your-org/relora
+cd relora
 cp .env.example .env        # review defaults, set JWT_SECRET for production
 docker-compose up --build
 ```
@@ -72,13 +72,13 @@ curl -s -b cookies.txt \
 **Or use the Python SDK:**
 
 ```bash
-pip install hermes-middleware-sdk        # coming to PyPI — install from ./sdks/python for now
+pip install relora-sdk        # coming to PyPI — install from ./sdks/python for now
 ```
 
 ```python
-from hermes import HermesClient
+from relora import ReloraClient
 
-client = HermesClient("http://localhost:8000", api_key="hk_...")
+client = ReloraClient("http://localhost:8000", api_key="hk_...")
 
 # Send a webhook
 result = client.send(
@@ -103,13 +103,13 @@ print(f"DLQ health: {health['health_score']}/100")
 
 ```bash
 pip install ./cli            # install from repo
-hermes config set --url http://localhost:8000 --api-key hk_...
+relora config set --url http://localhost:8000 --api-key hk_...
 
-hermes ingest --to http://localhost:9000/ok '{"event":"test"}'
-hermes stats
-hermes dlq list
-hermes dlq replay-all --confirm
-hermes listen --port 4040 --forward http://localhost:3000/hook
+relora ingest --to http://localhost:9000/ok '{"event":"test"}'
+relora stats
+relora dlq list
+relora dlq replay-all --confirm
+relora listen --port 4040 --forward http://localhost:3000/hook
 ```
 
 ---
@@ -121,7 +121,7 @@ Webhook Source (Stripe, GitHub, SNS, Pub/Sub…)
         │  POST
         ▼
 ┌─────────────────────────────┐
-│   Hermes Ingestion API      │  FastAPI — returns 200 immediately
+│   Relora Ingestion API      │  FastAPI — returns 200 immediately
 │   /api/v1/ingest            │  Writes to Postgres, runs filter/transform
 └────────────┬────────────────┘
              │ SELECT FOR UPDATE SKIP LOCKED
@@ -174,7 +174,7 @@ All state lives in **PostgreSQL**. No Redis. No Kafka. No external queue service
 - **AWS SNS** — `POST /api/v1/sources/aws-sns` with automatic subscription confirmation handshake
 - **GCP Pub/Sub** — push subscription endpoint with base64 data decoding
 - **Azure Event Grid** — both schemas, validation handshake, optional shared secret
-- **Stripe, GitHub, Shopify** — signature verification via `?signature_provider=stripe|github|hermes`
+- **Stripe, GitHub, Shopify** — signature verification via `?signature_provider=stripe|github|relora`
 
 ### Operations
 - **Graceful shutdown** — SIGTERM drains in-flight deliveries (35 s window) before exit
@@ -230,7 +230,7 @@ For TLS, use `nginx.prod.conf` instead of `nginx.conf`:
 Scale workers independently from the API:
 
 ```bash
-docker-compose up -d --scale hermes-worker=4
+docker-compose up -d --scale relora-worker=4
 ```
 
 All workers share the same Postgres queue via `SKIP LOCKED` — no coordination needed.
@@ -238,7 +238,7 @@ All workers share the same Postgres queue via `SKIP LOCKED` — no coordination 
 ### Database migrations
 
 ```bash
-docker-compose run --rm hermes-migrate   # runs alembic upgrade head
+docker-compose run --rm relora-migrate   # runs alembic upgrade head
 ```
 
 Never use `AUTO_CREATE_TABLES=true` in production.
@@ -250,35 +250,35 @@ Never use `AUTO_CREATE_TABLES=true` in production.
 **Python** (sync + async):
 ```bash
 pip install ./sdks/python          # local install
-# pip install hermes-middleware-sdk  # coming to PyPI
+# pip install relora-sdk  # coming to PyPI
 ```
 
 ```python
-from hermes import HermesClient
-from hermes.async_client import AsyncHermesClient
+from relora import ReloraClient
+from relora.async_client import AsyncReloraClient
 
 # Sync
-client = HermesClient("http://localhost:8000", api_key="hk_...")
+client = ReloraClient("http://localhost:8000", api_key="hk_...")
 client.send("https://myapp.com/hook", {"event": "order.created"})
 
 # Async
-async with AsyncHermesClient("http://localhost:8000", api_key="hk_...") as client:
+async with AsyncReloraClient("http://localhost:8000", api_key="hk_...") as client:
     await client.fan_out(["https://a.com/hook", "https://b.com/hook"], {"event": "test"})
 ```
 
 **JavaScript / TypeScript** (ESM + CJS, zero dependencies):
 ```bash
 npm install ./sdks/js              # local install
-# npm install hermes-middleware-sdk  # coming to npm
+# npm install relora-sdk  # coming to npm
 ```
 
 ```js
-import { Hermes } from 'hermes-middleware-sdk';
+import { Relora } from 'relora-sdk';
 
-const hermes = new Hermes('http://localhost:8000', { apiKey: 'hk_...' });
-await hermes.send('https://myapp.com/hook', { event: 'order.created' });
-await hermes.fanOut(['https://a.com/hook', 'https://b.com/hook'], { event: 'test' });
-const health = await hermes.dlqHealth();
+const relora = new Relora('http://localhost:8000', { apiKey: 'hk_...' });
+await relora.send('https://myapp.com/hook', { event: 'order.created' });
+await relora.fanOut(['https://a.com/hook', 'https://b.com/hook'], { event: 'test' });
+const health = await relora.dlqHealth();
 ```
 
 ---
@@ -288,17 +288,17 @@ const health = await hermes.dlqHealth();
 ```bash
 pip install ./cli
 
-hermes config set --url http://localhost:8000 --api-key hk_...
+relora config set --url http://localhost:8000 --api-key hk_...
 
-hermes ingest --to https://myapp.com/hook '{"event":"test"}'
-hermes status <webhook-id>
-hermes stats
-hermes dlq list
-hermes dlq replay <webhook-id>
-hermes dlq replay-all --confirm
-hermes dlq health
-hermes audit --resource-type destination --action UPDATE
-hermes listen --port 4040 --forward http://localhost:3000/hook
+relora ingest --to https://myapp.com/hook '{"event":"test"}'
+relora status <webhook-id>
+relora stats
+relora dlq list
+relora dlq replay <webhook-id>
+relora dlq replay-all --confirm
+relora dlq health
+relora audit --resource-type destination --action UPDATE
+relora listen --port 4040 --forward http://localhost:3000/hook
 ```
 
 ---

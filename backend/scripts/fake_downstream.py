@@ -4,7 +4,7 @@ from typing import Any, Dict
 from fastapi import FastAPI, Request, Response, status
 
 
-app = FastAPI(title="Hermes Fake Downstream")
+app = FastAPI(title="Relora Fake Downstream")
 received_events: list[Dict[str, Any]] = []
 flaky_counts: defaultdict[str, int] = defaultdict(int)
 
@@ -43,7 +43,7 @@ async def ok(request: Request) -> Dict[str, Any]:
 async def fail(request: Request) -> Response:
     await capture_event(request, "fail")
     return Response(
-        content='{"error":"intentional failure for Hermes demo"}',
+        content='{"error":"intentional failure for Relora demo"}',
         media_type="application/json",
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
     )

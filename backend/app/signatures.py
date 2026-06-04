@@ -19,11 +19,11 @@ def _get_secret(provider: str) -> str:
         return settings.STRIPE_WEBHOOK_SECRET
     if provider == "github":
         return settings.GITHUB_WEBHOOK_SECRET
-    if provider in {"hermes", "generic"}:
-        return settings.HERMES_WEBHOOK_SECRET
+    if provider in {"relora", "generic"}:
+        return settings.RELORA_WEBHOOK_SECRET
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Unsupported signature provider. Use stripe, github, or hermes.",
+        detail="Unsupported signature provider. Use stripe, github, or relora.",
     )
 
 
@@ -47,7 +47,7 @@ def verify_webhook_signature(provider: Optional[str], request: Request, raw_body
         _verify_github(request, raw_body, secret)
         return
 
-    _verify_hermes(request, raw_body, secret)
+    _verify_relora(request, raw_body, secret)
 
 
 def _verify_stripe(request: Request, raw_body: bytes, secret: str) -> None:
@@ -79,9 +79,9 @@ def _verify_github(request: Request, raw_body: bytes, secret: str) -> None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="GitHub signature verification failed")
 
 
-def _verify_hermes(request: Request, raw_body: bytes, secret: str) -> None:
-    algorithm = request.headers.get("X-Hermes-Signature-Algorithm", "sha256").lower()
+def _verify_relora(request: Request, raw_body: bytes, secret: str) -> None:
+    algorithm = request.headers.get("X-Relora-Signature-Algorithm", "sha256").lower()
     digest = sha1 if algorithm == "sha1" else sha256
     expected = hmac.new(secret.encode("utf-8"), raw_body, digest).hexdigest()
-    if not _compare_digest(expected, request.headers.get("X-Hermes-Signature")):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Hermes signature verification failed")
+    if not _compare_digest(expected, request.headers.get("X-Relora-Signature")):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Relora signature verification failed")

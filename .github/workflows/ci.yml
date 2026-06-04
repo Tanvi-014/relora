@@ -16,9 +16,9 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_USER: hermes
+          POSTGRES_USER: relora
           POSTGRES_PASSWORD: hermesdev
-          POSTGRES_DB: hermes
+          POSTGRES_DB: relora
         ports:
           - 5432:5432
         options: >-
@@ -28,13 +28,13 @@ jobs:
           --health-retries 10
 
     env:
-      DATABASE_URL: postgresql+asyncpg://hermes:hermesdev@localhost:5432/hermes
-      SYNC_DATABASE_URL: postgresql://hermes:hermesdev@localhost:5432/hermes
+      DATABASE_URL: postgresql+asyncpg://relora:hermesdev@localhost:5432/hermes
+      SYNC_DATABASE_URL: postgresql://relora:hermesdev@localhost:5432/hermes
       ENVIRONMENT: development
       AUTO_CREATE_TABLES: "true"
       ALLOW_PRIVATE_DESTINATIONS: "true"
       JWT_SECRET: ci-test-secret-not-for-production
-      PYTHONPATH: /home/runner/work/Hermes/Hermes/backend
+      PYTHONPATH: /home/runner/work/Relora/Relora/backend
 
     steps:
       - name: Checkout
@@ -54,7 +54,7 @@ jobs:
       - name: Run migrations
         run: alembic upgrade head
 
-      - name: Start Hermes API (background)
+      - name: Start Relora API (background)
         run: |
           uvicorn app.api_main:app --host 0.0.0.0 --port 8000 &
           sleep 5

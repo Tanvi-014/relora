@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import EventType
 
-logger = logging.getLogger("hermes.schema_validator")
+logger = logging.getLogger("relora.schema_validator")
 
 
 class SchemaValidator:

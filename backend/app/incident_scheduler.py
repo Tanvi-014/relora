@@ -1,5 +1,5 @@
 """
-Incident Scheduler for Hermes
+Incident Scheduler for Relora
 
 Automatically detects and creates incidents based on:
 - DLQ growth exceeding threshold
@@ -30,7 +30,7 @@ from app.models import (
 )
 
 configure_logging = None
-logger = logging.getLogger("hermes.incident_scheduler")
+logger = logging.getLogger("relora.incident_scheduler")
 
 
 class IncidentScheduler:

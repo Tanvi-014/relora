@@ -1,1 +1,1 @@
-"""Demo and utility scripts for Hermes."""
+"""Demo and utility scripts for Relora."""

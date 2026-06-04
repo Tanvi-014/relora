@@ -1,5 +1,5 @@
 """
-Incident Engine for Hermes
+Incident Engine for Relora
 
 Aggregates failures into incidents, manages incident lifecycle,
 and provides root cause analysis.

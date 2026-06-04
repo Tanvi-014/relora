@@ -1,0 +1,9 @@
+
+[async]
+httpx>=0.25
+
+[dev]
+pytest>=7
+pytest-asyncio>=0.23
+httpx>=0.25
+respx>=0.20

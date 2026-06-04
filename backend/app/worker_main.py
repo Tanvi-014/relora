@@ -13,7 +13,7 @@ from app.logging_config import configure_logging
 from app.worker import WorkerPool
 
 configure_logging()
-logger = logging.getLogger("hermes.worker_main")
+logger = logging.getLogger("relora.worker_main")
 
 
 async def main():

@@ -3,12 +3,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    APP_NAME: str = "Hermes Webhook Middleware"
+    APP_NAME: str = "Relora"
     ENVIRONMENT: str = "development"  # development | production
     DEBUG: bool = False
 
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/hermes"
-    SYNC_DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/hermes"
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/relora"
+    SYNC_DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/relora"
 
     # DB connection pool
     DB_POOL_SIZE: int = 20
@@ -24,13 +24,13 @@ class Settings(BaseSettings):
     BACKOFF_BASE_SECONDS: int = 30
 
     # Security
-    HERMES_API_KEY: str = ""
-    HERMES_API_KEYS: str = ""
+    RELORA_API_KEY: str = ""
+    RELORA_API_KEYS: str = ""
     ALLOW_PRIVATE_DESTINATIONS: bool = False
     DESTINATION_HOST_ALLOWLIST: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
     GITHUB_WEBHOOK_SECRET: str = ""
-    HERMES_WEBHOOK_SECRET: str = ""
+    RELORA_WEBHOOK_SECRET: str = ""
     SIGNATURE_TOLERANCE_SECONDS: int = 300
 
     # JWT — MUST be overridden in production
@@ -74,7 +74,7 @@ class Settings(BaseSettings):
 
     # Email alerts via Resend
     RESEND_API_KEY: str = ""
-    RESEND_FROM_EMAIL: str = "alerts@hermes.example.com"
+    RESEND_FROM_EMAIL: str = "alerts@relora.example.com"
 
     @property
     def is_production(self) -> bool:
@@ -95,14 +95,14 @@ class Settings(BaseSettings):
     @property
     def api_key_tenants(self) -> Dict[str, str]:
         tenants: Dict[str, str] = {}
-        for item in self.HERMES_API_KEYS.split(","):
+        for item in self.RELORA_API_KEYS.split(","):
             if not item.strip() or ":" not in item:
                 continue
             tenant_id, api_key = item.split(":", 1)
             if tenant_id.strip() and api_key.strip():
                 tenants[api_key.strip()] = tenant_id.strip()
-        if self.HERMES_API_KEY:
-            tenants[self.HERMES_API_KEY] = "default"
+        if self.RELORA_API_KEY:
+            tenants[self.RELORA_API_KEY] = "default"
         return tenants
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

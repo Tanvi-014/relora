@@ -9,7 +9,7 @@ import httpx
 def request_headers(api_key: str | None = None, idempotency_key: str | None = None) -> dict[str, str]:
     headers: dict[str, str] = {}
     if api_key:
-        headers["X-Hermes-API-Key"] = api_key
+        headers["X-Relora-API-Key"] = api_key
     if idempotency_key:
         headers["Idempotency-Key"] = idempotency_key
     return headers
@@ -45,9 +45,9 @@ def print_result(label: str, detail: dict) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run a Hermes webhook delivery demo.")
-    parser.add_argument("--base-url", default="http://localhost:8000", help="Hermes API base URL.")
-    parser.add_argument("--api-key", default=None, help="Optional Hermes API key.")
+    parser = argparse.ArgumentParser(description="Run a Relora webhook delivery demo.")
+    parser.add_argument("--base-url", default="http://localhost:8000", help="Relora API base URL.")
+    parser.add_argument("--api-key", default=None, help="Optional Relora API key.")
     parser.add_argument("--success-url", default="http://downstream:9000/ok", help="Destination that returns 2xx.")
     parser.add_argument("--failure-url", default="http://downstream:9000/fail", help="Destination that returns non-2xx.")
     parser.add_argument("--timeout", type=int, default=45, help="Seconds to wait for demo status changes.")
@@ -56,7 +56,7 @@ def main() -> int:
     with httpx.Client(base_url=args.base_url, timeout=10.0, headers=request_headers(args.api_key)) as client:
         health = client.get("/health")
         health.raise_for_status()
-        print(f"Hermes health: {health.json()['status']}")
+        print(f"Relora health: {health.json()['status']}")
 
         idempotency_key = f"demo-{uuid.uuid4()}"
         success = client.post(

@@ -61,8 +61,8 @@ def test_destination_host_allowlist_parses_csv(monkeypatch):
 
 
 def test_require_api_key_noops_when_unset(monkeypatch):
-    monkeypatch.setattr(settings, "HERMES_API_KEY", "")
-    monkeypatch.setattr(settings, "HERMES_API_KEYS", "")
+    monkeypatch.setattr(settings, "RELORA_API_KEY", "")
+    monkeypatch.setattr(settings, "RELORA_API_KEYS", "")
     request = Mock()
     request.headers = {}
 
@@ -70,8 +70,8 @@ def test_require_api_key_noops_when_unset(monkeypatch):
 
 
 def test_require_api_key_rejects_missing_key(monkeypatch):
-    monkeypatch.setattr(settings, "HERMES_API_KEY", "secret")
-    monkeypatch.setattr(settings, "HERMES_API_KEYS", "")
+    monkeypatch.setattr(settings, "RELORA_API_KEY", "secret")
+    monkeypatch.setattr(settings, "RELORA_API_KEYS", "")
     request = Mock()
     request.headers = {}
 
@@ -82,19 +82,19 @@ def test_require_api_key_rejects_missing_key(monkeypatch):
 
 
 def test_require_api_key_accepts_matching_key(monkeypatch):
-    monkeypatch.setattr(settings, "HERMES_API_KEY", "secret")
-    monkeypatch.setattr(settings, "HERMES_API_KEYS", "")
+    monkeypatch.setattr(settings, "RELORA_API_KEY", "secret")
+    monkeypatch.setattr(settings, "RELORA_API_KEYS", "")
     request = Mock()
-    request.headers = {"X-Hermes-API-Key": "secret"}
+    request.headers = {"X-Relora-API-Key": "secret"}
 
     assert asyncio.run(require_api_key(request)) == "default"
 
 
 def test_require_api_key_maps_named_tenant(monkeypatch):
-    monkeypatch.setattr(settings, "HERMES_API_KEY", "")
-    monkeypatch.setattr(settings, "HERMES_API_KEYS", "acme:key-acme")
+    monkeypatch.setattr(settings, "RELORA_API_KEY", "")
+    monkeypatch.setattr(settings, "RELORA_API_KEYS", "acme:key-acme")
     request = Mock()
-    request.headers = {"X-Hermes-API-Key": "key-acme"}
+    request.headers = {"X-Relora-API-Key": "key-acme"}
 
     assert asyncio.run(require_api_key(request)) == "acme"
 
@@ -119,17 +119,17 @@ def test_extract_event_id_prefers_payload_id():
     assert extract_event_id({"event": {"id": "evt_123"}}) == "evt_123"
 
 
-def test_verify_hermes_signature(monkeypatch):
-    monkeypatch.setattr(settings, "HERMES_WEBHOOK_SECRET", "topsecret")
+def test_verify_relora_signature(monkeypatch):
+    monkeypatch.setattr(settings, "RELORA_WEBHOOK_SECRET", "topsecret")
     body = b'{"event":"signed"}'
     signature = hmac.new(b"topsecret", body, sha256).hexdigest()
     request = Mock()
     request.headers = {
-        "X-Hermes-Signature": signature,
-        "X-Hermes-Signature-Algorithm": "sha256",
+        "X-Relora-Signature": signature,
+        "X-Relora-Signature-Algorithm": "sha256",
     }
 
-    assert verify_webhook_signature("hermes", request, body) is None
+    assert verify_webhook_signature("relora", request, body) is None
 
 
 def test_verify_stripe_signature(monkeypatch):

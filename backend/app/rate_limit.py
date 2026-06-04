@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 
-logger = logging.getLogger("hermes.rate_limit")
+logger = logging.getLogger("relora.rate_limit")
 
 
 async def check_rate_limit(

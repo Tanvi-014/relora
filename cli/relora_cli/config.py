@@ -1,10 +1,10 @@
-"""Loads CLI config from env vars or ~/.hermes/config."""
+"""Loads CLI config from env vars or ~/.relora/config."""
 import os
 import json
 from pathlib import Path
 
 
-_CONFIG_PATH = Path.home() / ".hermes" / "config.json"
+_CONFIG_PATH = Path.home() / ".relora" / "config.json"
 
 
 def load() -> dict:
@@ -14,8 +14,8 @@ def load() -> dict:
             cfg = json.loads(_CONFIG_PATH.read_text())
         except Exception:
             pass
-    cfg["url"] = os.environ.get("HERMES_URL", cfg.get("url", "http://localhost:8000"))
-    cfg["api_key"] = os.environ.get("HERMES_API_KEY", cfg.get("api_key", ""))
+    cfg["url"] = os.environ.get("RELORA_URL", cfg.get("url", "http://localhost:8000"))
+    cfg["api_key"] = os.environ.get("RELORA_API_KEY", cfg.get("api_key", ""))
     return cfg
 
 

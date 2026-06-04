@@ -25,7 +25,7 @@ from app.routers import auth, projects, destinations, webhooks, alerts, event_ty
 from app.routers import slo, schema_drift, events as events_router
 
 configure_logging()
-logger = logging.getLogger("hermes.api")
+logger = logging.getLogger("relora.api")
 
 _INSECURE_JWT_DEFAULT = "change-this-secret-in-production-use-openssl-rand-hex-32"
 
@@ -93,7 +93,7 @@ async def _recover_stuck_replay_jobs() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _validate_production_config()
-    setup_telemetry(service_name="hermes-api")
+    setup_telemetry(service_name="relora-api")
     if settings.AUTO_CREATE_TABLES:
         logger.info("AUTO_CREATE_TABLES=true, initializing tables...")
         await init_db()
@@ -110,9 +110,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Hermes Webhook Delivery Middleware",
+    title="Relora",
     description="""
-**Hermes** is a self-hosted, production-grade webhook relay and delivery engine.
+**Relora** is a self-hosted, production-grade webhook relay and delivery engine.
 
 It sits between webhook publishers (Stripe, GitHub, Shopify, internal services) and
 your application, accepting events immediately and delivering them asynchronously with
@@ -133,7 +133,7 @@ exponential retry, circuit breaking, fan-out routing, and a full DLQ intelligenc
 
 All endpoints (except `/health`) require either:
 - **JWT cookie** — obtained via `POST /auth/login` (SaaS dashboard users)
-- **API key header** — `X-Hermes-API-Key: <key>` (programmatic / SDK access)
+- **API key header** — `X-Relora-API-Key: <key>` (programmatic / SDK access)
 """,
     version="2.0.0",
     lifespan=lifespan,
@@ -170,7 +170,7 @@ if _cors_origins:
         allow_origins=_cors_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-        allow_headers=["Authorization", "Content-Type", "X-Hermes-API-Key"],
+        allow_headers=["Authorization", "Content-Type", "X-Relora-API-Key"],
     )
     logger.info("CORS enabled for origins: %s", _cors_origins)
 

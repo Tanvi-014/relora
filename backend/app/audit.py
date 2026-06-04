@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AuditLog
 
-logger = logging.getLogger("hermes.audit")
+logger = logging.getLogger("relora.audit")
 
 
 async def audit(

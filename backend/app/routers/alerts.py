@@ -113,7 +113,7 @@ async def test_alert(alert_id: UUID, tenant_id: str = Depends(get_tenant_from_au
         raise HTTPException(404, "Alert not found")
     test_data = {
         "webhook_id": "00000000-0000-0000-0000-000000000000",
-        "event_id": "evt_test_hermes",
+        "event_id": "evt_test_relora",
         "destination_url": "https://example.com/webhook",
         "retry_count": 5,
         "last_error": "HTTP 500: Internal Server Error",

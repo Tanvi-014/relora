@@ -1,0 +1,15 @@
+# Docker Compose override for load testing.
+#
+# Usage:
+#   docker-compose -f docker-compose.yml -f docker-compose.benchmark.yml up -d
+#   python benchmark/loadtest.py
+#
+# Raises the rate limit so the benchmark measures raw delivery throughput
+# rather than the token-bucket limiter. Never use this in production.
+
+services:
+  relora-api:
+    environment:
+      RATE_LIMIT_PER_MINUTE: "100000"
+      AUTH_RATE_LIMIT_PER_MINUTE: "10000"
+      MONTHLY_EVENT_QUOTA: "0"

@@ -24,7 +24,7 @@ from app.signatures import verify_webhook_signature
 from app.telemetry import record_ingested
 from app.routers.auth import EXCLUDED_INGEST_HEADERS
 
-logger = logging.getLogger("hermes.api")
+logger = logging.getLogger("relora.api")
 
 
 async def _get_project_by_api_key(db: AsyncSession, api_key: str) -> Project:
@@ -113,7 +113,7 @@ async def ingest_webhook(
     except Exception:
         payload = {"_raw_body": raw_body.decode("utf-8", errors="replace")}
 
-    explicit_event_id = request.headers.get("X-Event-Id") or request.headers.get("X-Hermes-Event-Id")
+    explicit_event_id = request.headers.get("X-Event-Id") or request.headers.get("X-Relora-Event-Id")
     event_id = extract_event_id(payload, explicit_event_id)
 
     # Extract event type name from payload or headers for schema validation
@@ -167,7 +167,7 @@ async def ingest_webhook(
 
     idempotency_key = (
         request.headers.get("Idempotency-Key")
-        or request.headers.get("X-Hermes-Idempotency-Key")
+        or request.headers.get("X-Relora-Idempotency-Key")
         or event_id
     )
 

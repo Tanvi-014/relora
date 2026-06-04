@@ -18,7 +18,7 @@ from app.models import AuditLog, DeliveryAttempt, Destination, Project, ProjectM
 from app.sse_hub import sse_hub
 from app.websocket_hub import ws_manager
 
-logger = logging.getLogger("hermes.api")
+logger = logging.getLogger("relora.api")
 
 router = APIRouter()
 
@@ -102,32 +102,32 @@ async def get_metrics(tenant_id: str = Depends(get_tenant_from_auth), db: AsyncS
     success_rate = round(completed / terminal * 100, 1) if terminal else 100.0
 
     lines = [
-        "# HELP hermes_webhooks_total Total ingested webhooks.",
-        "# TYPE hermes_webhooks_total gauge",
-        f"hermes_webhooks_total {total}",
-        "# HELP hermes_webhooks_by_status Webhooks by delivery status.",
-        "# TYPE hermes_webhooks_by_status gauge",
-        f'hermes_webhooks_by_status{{status="pending"}} {pending}',
-        f'hermes_webhooks_by_status{{status="processing"}} {processing}',
-        f'hermes_webhooks_by_status{{status="completed"}} {completed}',
-        f'hermes_webhooks_by_status{{status="failed"}} {failed}',
-        "# HELP hermes_delivery_attempts_total Total delivery attempts.",
-        "# TYPE hermes_delivery_attempts_total gauge",
-        f"hermes_delivery_attempts_total {attempts}",
-        "# HELP hermes_delivery_success_rate Percentage of successfully delivered webhooks.",
-        "# TYPE hermes_delivery_success_rate gauge",
-        f"hermes_delivery_success_rate {success_rate}",
-        "# HELP hermes_circuit_breaker_destinations Destinations per circuit breaker state.",
-        "# TYPE hermes_circuit_breaker_destinations gauge",
-        f'hermes_circuit_breaker_destinations{{state="closed"}} {cb_counts["closed"]}',
-        f'hermes_circuit_breaker_destinations{{state="open"}} {cb_counts["open"]}',
-        f'hermes_circuit_breaker_destinations{{state="half_open"}} {cb_counts["half_open"]}',
+        "# HELP relora_webhooks_total Total ingested webhooks.",
+        "# TYPE relora_webhooks_total gauge",
+        f"relora_webhooks_total {total}",
+        "# HELP relora_webhooks_by_status Webhooks by delivery status.",
+        "# TYPE relora_webhooks_by_status gauge",
+        f'relora_webhooks_by_status{{status="pending"}} {pending}',
+        f'relora_webhooks_by_status{{status="processing"}} {processing}',
+        f'relora_webhooks_by_status{{status="completed"}} {completed}',
+        f'relora_webhooks_by_status{{status="failed"}} {failed}',
+        "# HELP relora_delivery_attempts_total Total delivery attempts.",
+        "# TYPE relora_delivery_attempts_total gauge",
+        f"relora_delivery_attempts_total {attempts}",
+        "# HELP relora_delivery_success_rate Percentage of successfully delivered webhooks.",
+        "# TYPE relora_delivery_success_rate gauge",
+        f"relora_delivery_success_rate {success_rate}",
+        "# HELP relora_circuit_breaker_destinations Destinations per circuit breaker state.",
+        "# TYPE relora_circuit_breaker_destinations gauge",
+        f'relora_circuit_breaker_destinations{{state="closed"}} {cb_counts["closed"]}',
+        f'relora_circuit_breaker_destinations{{state="open"}} {cb_counts["open"]}',
+        f'relora_circuit_breaker_destinations{{state="half_open"}} {cb_counts["half_open"]}',
     ]
     if dlq_health_score is not None:
         lines += [
-            "# HELP hermes_dlq_health_score DLQ health score (0=critical 100=healthy).",
-            "# TYPE hermes_dlq_health_score gauge",
-            f"hermes_dlq_health_score {dlq_health_score}",
+            "# HELP relora_dlq_health_score DLQ health score (0=critical 100=healthy).",
+            "# TYPE relora_dlq_health_score gauge",
+            f"relora_dlq_health_score {dlq_health_score}",
         ]
     lines.append("")
     return Response(content="\n".join(lines), media_type="text/plain; version=0.0.4")

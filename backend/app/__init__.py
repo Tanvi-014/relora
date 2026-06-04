@@ -1,1 +1,1 @@
-"""Hermes backend application package."""
+"""Relora backend application package."""

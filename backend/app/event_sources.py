@@ -2,7 +2,7 @@
 Cloud event source adapters.
 
 Each adapter normalises a cloud-provider event envelope into the standard
-Hermes ingest format so it can be forwarded to any registered destination.
+Relora ingest format so it can be forwarded to any registered destination.
 
 Supported providers
 -------------------
@@ -30,7 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from app.auth import get_tenant_from_auth
 
-logger = logging.getLogger("hermes.event_sources")
+logger = logging.getLogger("relora.event_sources")
 
 router = APIRouter(prefix="/api/v1/sources", tags=["Event Sources"])
 
@@ -40,7 +40,7 @@ router = APIRouter(prefix="/api/v1/sources", tags=["Event Sources"])
 # ---------------------------------------------------------------------------
 
 def _extract_destination_id(header_value: Optional[str]) -> Optional[str]:
-    """X-Hermes-Destination-Id header lets callers route to a registered destination."""
+    """X-Relora-Destination-Id header lets callers route to a registered destination."""
     return header_value or None
 
 
@@ -73,11 +73,11 @@ async def _forward_to_ingest(
         destination_url = dest_obj.url
         dest_id_obj = dest_obj.id
     else:
-        destination_url = request.headers.get("X-Hermes-Destination-Url")
+        destination_url = request.headers.get("X-Relora-Destination-Url")
         if not destination_url:
             raise HTTPException(
                 400,
-                "Provide X-Hermes-Destination-Id or X-Hermes-Destination-Url header",
+                "Provide X-Relora-Destination-Id or X-Relora-Destination-Url header",
             )
         destination_url = validate_destination_url(destination_url)
         dest_id_obj = None
@@ -99,7 +99,7 @@ async def _forward_to_ingest(
         destination_url=destination_url,
         destination_id=dest_id_obj,
         payload=payload,
-        headers={"X-Hermes-Source": "cloud-adapter"},
+        headers={"X-Relora-Source": "cloud-adapter"},
         idempotency_key=idempotency_key,
         status=WebhookStatus.PENDING.value,
     )
@@ -122,7 +122,7 @@ async def _forward_to_ingest(
 async def ingest_aws_sns(
     request: Request,
     x_amz_sns_message_type: Optional[str] = Header(default=None),
-    x_hermes_destination_id: Optional[str] = Header(default=None),
+    x_relora_destination_id: Optional[str] = Header(default=None),
     tenant_id: str = Depends(get_tenant_from_auth),
     db: AsyncSession = Depends(get_db),
 ):
@@ -173,7 +173,7 @@ async def ingest_aws_sns(
 
     return await _forward_to_ingest(
         request, payload, tenant_id, event_id, db,
-        destination_id=x_hermes_destination_id,
+        destination_id=x_relora_destination_id,
     )
 
 
@@ -184,7 +184,7 @@ async def ingest_aws_sns(
 @router.post("/gcp-pubsub")
 async def ingest_gcp_pubsub(
     request: Request,
-    x_hermes_destination_id: Optional[str] = Header(default=None),
+    x_relora_destination_id: Optional[str] = Header(default=None),
     tenant_id: str = Depends(get_tenant_from_auth),
     db: AsyncSession = Depends(get_db),
 ):
@@ -226,7 +226,7 @@ async def ingest_gcp_pubsub(
 
     return await _forward_to_ingest(
         request, payload, tenant_id, event_id, db,
-        destination_id=x_hermes_destination_id,
+        destination_id=x_relora_destination_id,
     )
 
 
@@ -246,7 +246,7 @@ def _verify_azure_event_grid(request: Request, raw: bytes) -> None:
 async def ingest_azure_event_grid(
     request: Request,
     aeg_event_type: Optional[str] = Header(default=None),
-    x_hermes_destination_id: Optional[str] = Header(default=None),
+    x_relora_destination_id: Optional[str] = Header(default=None),
     tenant_id: str = Depends(get_tenant_from_auth),
     db: AsyncSession = Depends(get_db),
 ):
@@ -305,7 +305,7 @@ async def ingest_azure_event_grid(
         event_id = event.get("id") or str(uuid.uuid4())
         result = await _forward_to_ingest(
             request, payload, tenant_id, event_id, db,
-            destination_id=x_hermes_destination_id,
+            destination_id=x_relora_destination_id,
         )
         results.append(result)
 

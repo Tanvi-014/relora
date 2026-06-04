@@ -53,7 +53,7 @@ async def test_create_alert_config():
         config={
             "smtp_host": "smtp.gmail.com",
             "smtp_port": 587,
-            "from": "hermes@ops.com",
+            "from": "relora@ops.com",
             "to": "ops@ops.com",
             "password": "supersecret",
         },
@@ -71,7 +71,7 @@ async def test_create_alert_config():
             "config": {
                 "smtp_host": "smtp.gmail.com",
                 "smtp_port": 587,
-                "from": "hermes@ops.com",
+                "from": "relora@ops.com",
                 "to": "ops@ops.com",
                 "password": "••••••••",
             },
@@ -110,7 +110,7 @@ async def test_update_alert_config_prevents_secret_overwrite():
         config={
             "smtp_host": "smtp.gmail.com",
             "smtp_port": 587,
-            "from": "hermes@ops.com",
+            "from": "relora@ops.com",
             "to": "ops@ops.com",
             "password": "realpassword",
         },
@@ -126,7 +126,7 @@ async def test_update_alert_config_prevents_secret_overwrite():
         config={
             "smtp_host": "smtp.gmail.com",
             "smtp_port": 587,
-            "from": "hermes@ops.com",
+            "from": "relora@ops.com",
             "to": "ops@ops.com",
             "password": "••••••••",  # placeholder — must NOT overwrite real password
         },

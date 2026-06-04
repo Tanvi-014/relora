@@ -1,5 +1,5 @@
 """
-OpenTelemetry integration for Hermes.
+OpenTelemetry integration for Relora.
 
 Enabled when OTEL_EXPORTER_OTLP_ENDPOINT is set in the environment.
 Provides distributed tracing (via OTLP/gRPC) and custom metrics for:
@@ -18,14 +18,14 @@ import logging
 import os
 from typing import Optional
 
-logger = logging.getLogger("hermes.telemetry")
+logger = logging.getLogger("relora.telemetry")
 
 _tracer = None
 _meter = None
 _otel_available = False
 
 
-def setup_telemetry(service_name: str = "hermes") -> None:
+def setup_telemetry(service_name: str = "relora") -> None:
     global _tracer, _meter, _otel_available
 
     endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
@@ -96,32 +96,32 @@ def _register_instruments() -> None:
         return
 
     _webhooks_ingested = _meter.create_counter(
-        "hermes.webhooks.ingested",
+        "relora.webhooks.ingested",
         description="Total webhooks accepted at the ingest endpoint",
         unit="1",
     )
     _webhooks_delivered = _meter.create_counter(
-        "hermes.webhooks.delivered",
+        "relora.webhooks.delivered",
         description="Total webhooks successfully delivered to destinations",
         unit="1",
     )
     _webhooks_failed = _meter.create_counter(
-        "hermes.webhooks.failed",
+        "relora.webhooks.failed",
         description="Total webhooks that exhausted all retries (DLQ)",
         unit="1",
     )
     _delivery_duration = _meter.create_histogram(
-        "hermes.delivery.duration_ms",
+        "relora.delivery.duration_ms",
         description="HTTP delivery round-trip latency in milliseconds",
         unit="ms",
     )
     _dlq_depth = _meter.create_up_down_counter(
-        "hermes.dlq.depth",
+        "relora.dlq.depth",
         description="Current number of webhooks in the dead-letter queue",
         unit="1",
     )
     _circuit_trips = _meter.create_counter(
-        "hermes.circuit_breaker.trips",
+        "relora.circuit_breaker.trips",
         description="Number of times a destination circuit breaker opened",
         unit="1",
     )

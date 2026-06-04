@@ -1,4 +1,4 @@
-# Hermes — Development Progress Tracker
+# Relora — Development Progress Tracker
 
 > Living document. Updated at every milestone.
 
@@ -112,7 +112,7 @@ Sender (Stripe, Twilio, GitHub...)
 |---------|-------|--------|
 | Idempotency | `models.py`, `main.py` | ✅ `Idempotency-Key` header + unique constraint on `(tenant, destination, key)` |
 | Signature Verification | `signatures.py` | ✅ Stripe, GitHub, and generic HMAC verification |
-| API Key Auth | `security.py`, `config.py` | ✅ `X-Hermes-API-Key` header with tenant mapping |
+| API Key Auth | `security.py`, `config.py` | ✅ `X-Relora-API-Key` header with tenant mapping |
 | Multi-tenant Isolation | `main.py`, `models.py` | ✅ `tenant_id` column, tenant-scoped queries |
 | Destination URL Validation | `security.py` | ✅ Private IP blocking, host allowlists |
 | Structured JSON Logging | `logging_config.py` | ✅ Structured events with tenant/webhook/event IDs |
@@ -167,21 +167,21 @@ Developers shouldn't need curl. They need standard zero-dependency libraries:
 
 ```python
 # Python
-from hermes import HermesClient
-client = HermesClient("http://localhost:8000", api_key="hk_...")
+from relora import ReloraClient
+client = ReloraClient("http://localhost:8000", api_key="hk_...")
 client.send("https://myapp.com/webhook", {"event": "order.created"})
 ```
 
 ```javascript
 // JavaScript
-import { Hermes } from 'hermes-middleware-sdk';
-const hermes = new Hermes('http://localhost:8000', { apiKey: 'hk_...' });
-await hermes.send('https://myapp.com/webhook', { event: 'order.created' });
+import { Relora } from 'relora-sdk';
+const relora = new Relora('http://localhost:8000', { apiKey: 'hk_...' });
+await relora.send('https://myapp.com/webhook', { event: 'order.created' });
 ```
 
 ### What to build:
-- `[x]` **Python SDK** — `sdks/python/` package with zero-dependency `HermesClient` class
-- `[x]` **JavaScript SDK** — `sdks/js/` package with ESM/Node compatible `Hermes` class
+- `[x]` **Python SDK** — `sdks/python/` package with zero-dependency `ReloraClient` class
+- `[x]` **JavaScript SDK** — `sdks/js/` package with ESM/Node compatible `Relora` class
 - `[x]` **SDK docs & setup** — Comprehensive setup configurations and usage README details
 
 ---
@@ -245,8 +245,8 @@ Currently auth is API-key based. Real SaaS needs login, projects, teams.
 **Date Completed: 2026-05-29**
 
 ### What to build:
-- [x] **Stripe test mode walkthrough** — Connect Stripe CLI, forward events through Hermes
-- [x] **GitHub webhook walkthrough** — Configure a repo webhook to point at Hermes
+- [x] **Stripe test mode walkthrough** — Connect Stripe CLI, forward events through Relora
+- [x] **GitHub webhook walkthrough** — Configure a repo webhook to point at Relora
 - [x] **Integration documentation** — Comprehensive guides for Stripe and GitHub
 - [x] **README examples** — Quick integration examples in main README
 
@@ -385,7 +385,7 @@ Currently auth is API-key based. Real SaaS needs login, projects, teams.
 **Status: SHIPPED**
 **Date Completed: 2026-06-03**
 
-Complete visual redesign of the Hermes dashboard. The previous UI had patterns that signalled "AI-generated template" rather than a production-grade engineering tool.
+Complete visual redesign of the Relora dashboard. The previous UI had patterns that signalled "AI-generated template" rather than a production-grade engineering tool.
 
 ### Design audit findings:
 - Purple/indigo `#6366F1` accent on purple-tinted dark surfaces — the canonical "AI dashboard" colour stack
@@ -479,8 +479,8 @@ Complete visual redesign of the Hermes dashboard. The previous UI had patterns t
 | Billing enforcement | ✅ | `MONTHLY_EVENT_QUOTA` config; hard HTTP 429 cutoff at ingest when set; 0=unlimited for self-hosted |
 | Container ops | ✅ | Worker `stop_grace_period: 40s`; `FORCE_HTTPS`/`COOKIE_SECURE` env-driven in compose; real worker healthcheck |
 | Audit log | ✅ | `audit_log` table (migration 0009); `audit.py` flush-before-commit; `GET /api/v1/audit-log`; wired into destinations CREATE/UPDATE/DELETE |
-| CLI | ✅ | `hermes` Click CLI — ingest, status, stats, dlq (list/replay/replay-all/health), audit, listen (local tunnel) |
-| Python SDK | ✅ | `pyproject.toml` (pip-publishable); sync `HermesClient` + async `AsyncHermesClient`; full type hints; send/fan_out/dlq/audit/destinations |
+| CLI | ✅ | `relora` Click CLI — ingest, status, stats, dlq (list/replay/replay-all/health), audit, listen (local tunnel) |
+| Python SDK | ✅ | `pyproject.toml` (pip-publishable); sync `ReloraClient` + async `AsyncReloraClient`; full type hints; send/fan_out/dlq/audit/destinations |
 | JS SDK | ✅ | ESM+CJS dual export; `client.d.ts` TypeScript definitions; full method parity with Python SDK |
 | Load test | ✅ | `benchmark/loadtest.py` — asyncio+httpx, configurable concurrency/duration, P50/P95/P99, JSON result output |
 | OpenAPI docs | ✅ | Full description, 12 tagged endpoint groups, `/api/docs` Swagger UI, `/api/redoc` Redoc |
@@ -560,9 +560,9 @@ Complete visual redesign of the Hermes dashboard. The previous UI had patterns t
 | 2026-06-04 | 14 | Confirmed schema_validator.py and sse_hub.py fully wired (routers/webhooks, routers/event_types, worker, routers/system) |
 | 2026-06-04 | 14 | Added audit_log table (migration 0009), AuditLog model, audit.py module; wired into destinations CREATE/UPDATE/DELETE |
 | 2026-06-04 | 14 | Added GET /api/v1/audit-log endpoint with resource_type, action, pagination filters |
-| 2026-06-04 | 14 | Built hermes CLI: ingest, status, stats, dlq (list/replay/replay-all/health), audit, listen (local tunnel); installable via pip install ./cli |
-| 2026-06-04 | 14 | Modernized Python SDK: pyproject.toml, HermesError, AsyncHermesClient, fan_out, dlq_health, get_audit_log, list_destinations |
-| 2026-06-04 | 14 | Modernized JS SDK: ESM+CJS dual export, TypeScript client.d.ts, full method parity, HermesError class, AbortController timeout |
+| 2026-06-04 | 14 | Built relora CLI: ingest, status, stats, dlq (list/replay/replay-all/health), audit, listen (local tunnel); installable via pip install ./cli |
+| 2026-06-04 | 14 | Modernized Python SDK: pyproject.toml, ReloraError, AsyncReloraClient, fan_out, dlq_health, get_audit_log, list_destinations |
+| 2026-06-04 | 14 | Modernized JS SDK: ESM+CJS dual export, TypeScript client.d.ts, full method parity, ReloraError class, AbortController timeout |
 | 2026-06-04 | 14 | Added benchmark/loadtest.py: asyncio+httpx, configurable concurrency/duration, P50/P95/P99 output, last_result.json |
 | 2026-06-04 | 14 | Enhanced FastAPI OpenAPI metadata: full description, auth docs, 12 tagged endpoint groups, /api/docs + /api/redoc |
 | 2026-06-04 | 14 | Overhauled README: feature table vs DIY/hosted, quickstart, architecture, config reference, production deploy, SDK+CLI examples |

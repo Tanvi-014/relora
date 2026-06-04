@@ -381,7 +381,7 @@ async function loadSchemaDrift() {
   try {
     const data = await apiFetch('/schema-changes?unacknowledged_only=false&limit=100');
     if (!data.changes.length) {
-      container.innerHTML = '<div class="empty-state"><div class="title">No schema changes detected yet</div><div class="desc">Hermes will fingerprint every inbound payload and alert you here when the structure changes.</div></div>';
+      container.innerHTML = '<div class="empty-state"><div class="title">No schema changes detected yet</div><div class="desc">Relora will fingerprint every inbound payload and alert you here when the structure changes.</div></div>';
       return;
     }
     container.innerHTML = `<table class="data-table"><thead><tr>

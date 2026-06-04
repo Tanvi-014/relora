@@ -31,7 +31,7 @@ from app.standard_webhooks import sign_outbound_webhook
 from app.websocket_hub import ws_manager
 
 configure_logging()
-logger = logging.getLogger("hermes.worker")
+logger = logging.getLogger("relora.worker")
 
 # FIFO-aware claim query:
 # - Ordered webhooks (ordering_key set) are delivered strictly by creation order.
@@ -225,10 +225,10 @@ class WebhookWorker:
         if dest_config and dest_config.get("custom_headers"):
             delivery_headers.update(dest_config["custom_headers"])
 
-        # Hermes tracing headers
-        delivery_headers["X-Hermes-Delivery-Id"] = _uuid_str(webhook_id)
-        delivery_headers["X-Hermes-Event-Id"] = event_id
-        delivery_headers["X-Hermes-Attempt"] = str(attempt_number)
+        # Relora tracing headers
+        delivery_headers["X-Relora-Delivery-Id"] = _uuid_str(webhook_id)
+        delivery_headers["X-Relora-Event-Id"] = event_id
+        delivery_headers["X-Relora-Attempt"] = str(attempt_number)
 
         # Standard Webhooks signing
         webhook_secret = (dest_config or {}).get("webhook_secret") or settings.STANDARD_WEBHOOKS_SECRET

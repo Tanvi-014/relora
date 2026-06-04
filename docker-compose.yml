@@ -1,56 +1,56 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: hermes-postgres
+    container_name: relora-postgres
     environment:
-      POSTGRES_USER: hermes
+      POSTGRES_USER: relora
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hermesdev}
-      POSTGRES_DB: hermes
+      POSTGRES_DB: relora
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5435:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hermes -d hermes"]
+      test: ["CMD-SHELL", "pg_isready -U relora -d relora"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   nginx:
     image: nginx:1.27-alpine
-    container_name: hermes-nginx
+    container_name: relora-nginx
     ports:
       - "8080:80"
     volumes:
       - ./frontend:/usr/share/nginx/html:ro
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
-      hermes-api:
+      relora-api:
         condition: service_healthy
 
-  hermes-migrate:
+  relora-migrate:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    container_name: hermes-migrate
+    container_name: relora-migrate
     command: sh -c "cd /app/backend && alembic upgrade head"
     environment:
-      DATABASE_URL: postgresql+asyncpg://hermes:${POSTGRES_PASSWORD:-hermesdev}@postgres:5432/hermes
-      SYNC_DATABASE_URL: postgresql://hermes:${POSTGRES_PASSWORD:-hermesdev}@postgres:5432/hermes
+      DATABASE_URL: postgresql+asyncpg://relora:${POSTGRES_PASSWORD:-hermesdev}@postgres:5432/relora
+      SYNC_DATABASE_URL: postgresql://relora:${POSTGRES_PASSWORD:-hermesdev}@postgres:5432/relora
     depends_on:
       postgres:
         condition: service_healthy
     restart: "no"
 
-  hermes-api:
+  relora-api:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    container_name: hermes-api
+    container_name: relora-api
     command: uvicorn app.api_main:app --host 0.0.0.0 --port 8000
     environment:
-      DATABASE_URL: postgresql+asyncpg://hermes:${POSTGRES_PASSWORD:-hermesdev}@postgres:5432/hermes
-      SYNC_DATABASE_URL: postgresql://hermes:${POSTGRES_PASSWORD:-hermesdev}@postgres:5432/hermes
+      DATABASE_URL: postgresql+asyncpg://relora:${POSTGRES_PASSWORD:-hermesdev}@postgres:5432/relora
+      SYNC_DATABASE_URL: postgresql://relora:${POSTGRES_PASSWORD:-hermesdev}@postgres:5432/relora
       ENVIRONMENT: ${ENVIRONMENT:-development}
       AUTO_CREATE_TABLES: "false"
       ALLOW_PRIVATE_DESTINATIONS: ${ALLOW_PRIVATE_DESTINATIONS:-false}
@@ -61,11 +61,11 @@ services:
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-60}
       MONTHLY_EVENT_QUOTA: ${MONTHLY_EVENT_QUOTA:-0}
       JWT_SECRET: ${JWT_SECRET:-change-in-production}
-      HERMES_API_KEY: ${HERMES_API_KEY:-}
-      HERMES_API_KEYS: ${HERMES_API_KEYS:-}
+      RELORA_API_KEY: ${RELORA_API_KEY:-}
+      RELORA_API_KEYS: ${RELORA_API_KEYS:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
-      HERMES_WEBHOOK_SECRET: ${HERMES_WEBHOOK_SECRET:-}
+      RELORA_WEBHOOK_SECRET: ${RELORA_WEBHOOK_SECRET:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ENABLE_AI_FEATURES: ${ENABLE_AI_FEATURES:-false}
       ENABLE_SIMULATOR: "true"
@@ -75,7 +75,7 @@ services:
       - ./backend:/workspace/backend:ro
       - ./frontend:/workspace/frontend:ro
     depends_on:
-      hermes-migrate:
+      relora-migrate:
         condition: service_completed_successfully
     ports:
       - "8000:8000"
@@ -85,11 +85,11 @@ services:
       timeout: 5s
       retries: 5
 
-  hermes-worker:
+  relora-worker:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    container_name: hermes-worker
+    container_name: relora-worker
     command: python -m app.worker_main
     stop_grace_period: 40s
     healthcheck:
@@ -98,7 +98,7 @@ services:
       timeout: 5s
       retries: 3
     environment:
-      DATABASE_URL: postgresql+asyncpg://hermes:${POSTGRES_PASSWORD:-hermesdev}@postgres:5432/hermes
+      DATABASE_URL: postgresql+asyncpg://relora:${POSTGRES_PASSWORD:-hermesdev}@postgres:5432/relora
       ENVIRONMENT: ${ENVIRONMENT:-development}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-10}
       WORKER_POLL_INTERVAL_SECONDS: "1"
@@ -110,21 +110,26 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ENABLE_AI_FEATURES: ${ENABLE_AI_FEATURES:-false}
     depends_on:
-      hermes-migrate:
+      relora-migrate:
         condition: service_completed_successfully
 
   downstream:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    container_name: hermes-downstream
+    container_name: relora-downstream
     command: uvicorn scripts.fake_downstream:app --host 0.0.0.0 --port 9000
     environment:
-      DATABASE_URL: postgresql+asyncpg://hermes:${POSTGRES_PASSWORD:-hermesdev}@postgres:5432/hermes
+      DATABASE_URL: postgresql+asyncpg://relora:${POSTGRES_PASSWORD:-hermesdev}@postgres:5432/relora
     volumes:
       - ./backend:/workspace/backend:ro
     ports:
       - "9000:9000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:9000/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres_data:

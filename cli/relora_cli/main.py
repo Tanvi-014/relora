@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-hermes — CLI for the Hermes Webhook Delivery Middleware
+relora — CLI for the Relora
 
 Configure once:
-    hermes config set --url http://localhost:8000 --api-key hk_...
+    relora config set --url http://localhost:8000 --api-key hk_...
 
 Then use:
-    hermes ingest --url https://myapp.com/hook '{"event":"test"}'
-    hermes status <webhook-id>
-    hermes dlq list
-    hermes dlq replay <webhook-id>
-    hermes dlq replay-all
-    hermes stats
-    hermes audit
-    hermes listen --port 4040 --forward http://localhost:3000/hook
+    relora ingest --url https://myapp.com/hook '{"event":"test"}'
+    relora status <webhook-id>
+    relora dlq list
+    relora dlq replay <webhook-id>
+    relora dlq replay-all
+    relora stats
+    relora audit
+    relora listen --port 4040 --forward http://localhost:3000/hook
 """
 import json
 import sys
@@ -24,8 +24,8 @@ from typing import Optional
 
 import click
 
-from hermes_cli import config as _cfg
-from hermes_cli.client import CLIClient
+from relora_cli import config as _cfg
+from relora_cli.client import CLIClient
 
 
 # ── Shared context ──────────────────────────────────────────────────────────
@@ -42,11 +42,11 @@ def _print_json(data: dict) -> None:
 # ── Root ─────────────────────────────────────────────────────────────────────
 
 @click.group()
-@click.option("--url", envvar="HERMES_URL", default=None, help="Hermes base URL")
-@click.option("--api-key", envvar="HERMES_API_KEY", default=None, help="API key")
+@click.option("--url", envvar="RELORA_URL", default=None, help="Relora base URL")
+@click.option("--api-key", envvar="RELORA_API_KEY", default=None, help="API key")
 @click.pass_context
 def cli(ctx: click.Context, url: Optional[str], api_key: Optional[str]) -> None:
-    """Hermes Webhook Delivery Middleware CLI."""
+    """Relora CLI."""
     ctx.ensure_object(dict)
     loaded = _cfg.load()
     ctx.obj["url"] = url or loaded["url"]
@@ -61,10 +61,10 @@ def config() -> None:
 
 
 @config.command("set")
-@click.option("--url", required=True, help="Hermes base URL, e.g. http://localhost:8000")
+@click.option("--url", required=True, help="Relora base URL, e.g. http://localhost:8000")
 @click.option("--api-key", default="", help="API key (leave empty for unauthenticated)")
 def config_set(url: str, api_key: str) -> None:
-    """Persist connection settings to ~/.hermes/config.json."""
+    """Persist connection settings to ~/.relora/config.json."""
     _cfg.save({"url": url, "api_key": api_key})
     click.echo(f"Saved config — url={url}")
 
@@ -94,7 +94,7 @@ def ingest(
     idempotency_key: Optional[str],
     destination_id: Optional[str],
 ) -> None:
-    """Ingest a webhook event through Hermes.
+    """Ingest a webhook event through Relora.
 
     PAYLOAD is a JSON string, e.g. '{"event":"order.created","amount":99}'
     """
@@ -246,15 +246,15 @@ def audit(
 @cli.command()
 @click.option("--port", default=4040, show_default=True, help="Local port to listen on")
 @click.option("--forward", "forward_url", required=True, help="Forward requests to this URL")
-@click.option("--ingest-to", "ingest_url", default=None, help="Also ingest forwarded events into Hermes")
+@click.option("--ingest-to", "ingest_url", default=None, help="Also ingest forwarded events into Relora")
 @click.pass_context
 def listen(ctx: click.Context, port: int, forward_url: str, ingest_url: Optional[str]) -> None:
     """Start a local listener that forwards webhooks to your app.
 
     Useful for local development: point your webhook provider at
-    http://localhost:<port> and Hermes will forward every POST to --forward.
+    http://localhost:<port> and Relora will forward every POST to --forward.
 
-    With --ingest-to, each request is also stored in Hermes for replay/DLQ.
+    With --ingest-to, each request is also stored in Relora for replay/DLQ.
     """
     import http.server
     import urllib.request as _req
@@ -293,7 +293,7 @@ def listen(ctx: click.Context, port: int, forward_url: str, ingest_url: Optional
                         payload=json.loads(body) if body else {},
                         params=f"url={urllib.parse.quote(ingest_url, safe='')}",
                     )
-                    click.echo(f"    ✓ ingested into Hermes")
+                    click.echo(f"    ✓ ingested into Relora")
                 except Exception as exc:
                     click.echo(f"    ✗ ingest failed: {exc}")
 

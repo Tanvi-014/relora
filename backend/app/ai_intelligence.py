@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 
 from app.config import settings
 
-logger = logging.getLogger("hermes.ai")
+logger = logging.getLogger("relora.ai")
 
 _SYSTEM_ANALYZE = """You are a webhook payload analyzer. Analyze the provided JSON payload and return ONLY valid JSON with no other text, using this exact schema:
 {

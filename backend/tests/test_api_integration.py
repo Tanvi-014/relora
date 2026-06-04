@@ -1,5 +1,5 @@
 """
-Live integration tests against a running Hermes instance.
+Live integration tests against a running Relora instance.
 Run with: HERMES_TEST_BASE_URL=http://localhost:8000 pytest tests/test_api_integration.py
 
 Inside Docker Compose these use http://downstream:9000/ok and /fail.
@@ -27,14 +27,14 @@ def get_headers():
 def get_project_headers():
     """Project API key for project-scoped endpoints (destinations, event-types, ingest)."""
     if _project_api_key:
-        return {"X-Hermes-API-Key": _project_api_key, "Content-Type": "application/json"}
+        return {"X-Relora-API-Key": _project_api_key, "Content-Type": "application/json"}
     return get_headers()
 
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_session():
     global _session_token, _project_api_key
-    email = f"itest_{uuid.uuid4().hex[:8]}@hermes.test"
+    email = f"itest_{uuid.uuid4().hex[:8]}@relora.test"
     password = "IntegrationTest123!"
 
     r = httpx.post(f"{BASE_URL}/api/v1/auth/register", json={"email": email, "password": password})
@@ -128,7 +128,7 @@ def test_stats():
 def test_metrics():
     r = httpx.get(f"{BASE_URL}/metrics", headers=get_headers())
     assert r.status_code == 200
-    assert "hermes_webhooks_total" in r.text
+    assert "relora_webhooks_total" in r.text
 
 
 def test_simulate_providers():

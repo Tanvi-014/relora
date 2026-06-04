@@ -58,7 +58,7 @@ async def simulate_webhook(
         destination_url=dest_url,
         destination_id=dest_id_obj,
         payload=payload,
-        headers={"X-Hermes-Simulated": "true", "X-Hermes-Provider": provider},
+        headers={"X-Relora-Simulated": "true", "X-Relora-Provider": provider},
         idempotency_key=None,
         status=WebhookStatus.PENDING.value,
         max_retries=settings.DEFAULT_MAX_RETRIES,

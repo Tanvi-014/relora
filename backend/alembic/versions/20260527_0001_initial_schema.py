@@ -1,4 +1,4 @@
-"""Initial Hermes schema.
+"""Initial Relora schema.
 
 Revision ID: 20260527_0001
 Revises:

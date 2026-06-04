@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AlertConfig
 
-logger = logging.getLogger("hermes.alerts")
+logger = logging.getLogger("relora.alerts")
 
 
 async def dispatch_dlq_alert(
@@ -101,7 +101,7 @@ async def _send_slack_alert(config: AlertConfig, data: Dict[str, Any]) -> None:
                 "type": "header",
                 "text": {
                     "type": "plain_text",
-                    "text": "🚨 Hermes — Webhook Delivery Failed",
+                    "text": "🚨 Relora — Webhook Delivery Failed",
                     "emoji": True,
                 },
             },
@@ -124,7 +124,7 @@ async def _send_slack_alert(config: AlertConfig, data: Dict[str, Any]) -> None:
                 "elements": [
                     {
                         "type": "mrkdwn",
-                        "text": f"Tenant: `{data['tenant_id']}` • Open the Hermes dashboard to inspect and replay.",
+                        "text": f"Tenant: `{data['tenant_id']}` • Open the Relora dashboard to inspect and replay.",
                     }
                 ],
             },
@@ -157,7 +157,7 @@ async def _send_email_alert(config: AlertConfig, data: Dict[str, Any]) -> None:
         if field not in email_config:
             raise ValueError(f"Email alert config is missing '{field}'")
 
-    subject = f"🚨 Hermes Alert — Webhook Failed: {data['destination_url']}"
+    subject = f"🚨 Relora Alert — Webhook Failed: {data['destination_url']}"
 
     html_body = f"""
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 600px; margin: 0 auto; background: #121214; color: #f4f4f5; padding: 24px; border-radius: 8px;">
@@ -188,7 +188,7 @@ async def _send_email_alert(config: AlertConfig, data: Dict[str, Any]) -> None:
             </tr>
         </table>
         <p style="color: #71717a; font-size: 12px;">
-            Open the Hermes dashboard to inspect the payload and replay delivery.
+            Open the Relora dashboard to inspect the payload and replay delivery.
         </p>
     </div>
     """

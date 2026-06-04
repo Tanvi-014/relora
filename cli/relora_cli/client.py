@@ -14,7 +14,7 @@ class CLIClient:
     def _headers(self, extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
         h = {"Content-Type": "application/json", "Accept": "application/json"}
         if self.api_key:
-            h["X-Hermes-API-Key"] = self.api_key
+            h["X-Relora-API-Key"] = self.api_key
         if extra:
             h.update(extra)
         return h

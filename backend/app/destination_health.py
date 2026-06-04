@@ -1,5 +1,5 @@
 """
-Destination Health Analysis Module for Hermes
+Destination Health Analysis Module for Relora
 
 Provides per-destination health analysis including:
 - Success Rate

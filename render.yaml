@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: hermes
+    name: relora
     env: python
     plan: free
     buildCommand: cd backend && pip install -r requirements.txt
@@ -10,11 +10,11 @@ services:
     envVars:
       - key: DATABASE_URL
         fromDatabase:
-          name: hermes-db
+          name: relora-db
           property: connectionString
       - key: SYNC_DATABASE_URL
         fromDatabase:
-          name: hermes-db
+          name: relora-db
           property: connectionString
       - key: JWT_SECRET
         generateValue: true
@@ -26,5 +26,5 @@ services:
         value: "false"
 
 databases:
-  - name: hermes-db
+  - name: relora-db
     plan: free

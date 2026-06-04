@@ -1,6 +1,7 @@
-"""Async Hermes SDK client — requires httpx (pip install hermes-middleware-sdk[async])."""
+"""Async Relora SDK client — requires httpx (pip install relora-sdk[async])."""
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any, Dict, List, Optional
 
@@ -8,24 +9,28 @@ try:
     import httpx
 except ImportError as exc:
     raise ImportError(
-        "AsyncHermesClient requires httpx. Install it with:\n"
-        "    pip install hermes-middleware-sdk[async]"
+        "AsyncReloraClient requires httpx. Install it with:\n"
+        "    pip install relora-sdk[async]"
     ) from exc
 
-from hermes.client import HermesError
+from relora.client import ReloraError
 
 
-class AsyncHermesClient:
-    """Async client for the Hermes Webhook Delivery Middleware.
+class AsyncReloraClient:
+    """Async client for the Relora.
 
-    Requires ``httpx`` (``pip install hermes-middleware-sdk[async]``).
+    Requires ``httpx`` (``pip install relora-sdk[async]``).
 
     Example::
 
-        from hermes.async_client import AsyncHermesClient
+        from relora import AsyncReloraClient
 
-        async with AsyncHermesClient("http://localhost:8000", api_key="hk_...") as client:
-            result = await client.send("https://myapp.com/hook", {"event": "order.created"})
+        async with AsyncReloraClient("http://localhost:8000", api_key="hk_...") as client:
+            result = await client.send(
+                "https://myapp.com/hook",
+                {"event": "order.created"},
+                idempotency_key="order-123",
+            )
     """
 
     def __init__(
@@ -33,13 +38,15 @@ class AsyncHermesClient:
         base_url: str,
         api_key: Optional[str] = None,
         timeout: float = 15.0,
+        project_id: Optional[str] = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
+        self.project_id = project_id
         self._client: Optional[httpx.AsyncClient] = None
 
-    async def __aenter__(self) -> "AsyncHermesClient":
+    async def __aenter__(self) -> "AsyncReloraClient":
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
             headers=self._base_headers(),
@@ -52,9 +59,11 @@ class AsyncHermesClient:
             await self._client.aclose()
 
     def _base_headers(self) -> Dict[str, str]:
-        h = {"Content-Type": "application/json", "Accept": "application/json"}
+        h: Dict[str, str] = {"Content-Type": "application/json", "Accept": "application/json"}
         if self.api_key:
-            h["X-Hermes-API-Key"] = self.api_key
+            h["X-Relora-API-Key"] = self.api_key
+        if self.project_id:
+            h["X-Project-Id"] = self.project_id
         return h
 
     async def _request(
@@ -66,7 +75,7 @@ class AsyncHermesClient:
         extra_headers: Optional[Dict[str, str]] = None,
     ) -> Any:
         if self._client is None:
-            raise RuntimeError("Use AsyncHermesClient as an async context manager")
+            raise RuntimeError("Use AsyncReloraClient as an async context manager")
         try:
             resp = await self._client.request(
                 method,
@@ -82,9 +91,9 @@ class AsyncHermesClient:
                 detail = exc.response.json().get("detail", exc.response.text)
             except Exception:
                 detail = exc.response.text
-            raise HermesError(exc.response.status_code, detail) from exc
+            raise ReloraError(exc.response.status_code, detail) from exc
         except Exception as exc:
-            raise HermesError(0, str(exc)) from exc
+            raise ReloraError(0, str(exc)) from exc
 
     # ── Ingest ──────────────────────────────────────────────────────────────
 
@@ -98,7 +107,9 @@ class AsyncHermesClient:
         transform: Optional[Dict[str, Any]] = None,
         ordering_key: Optional[str] = None,
         signature_provider: Optional[str] = None,
+        extra_headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
+        """Ingest a single webhook event through Relora."""
         params: Dict[str, str] = {"url": destination_url}
         if filter_expression:
             params["filter"] = filter_expression
@@ -111,7 +122,11 @@ class AsyncHermesClient:
         headers: Dict[str, str] = {}
         if idempotency_key:
             headers["Idempotency-Key"] = idempotency_key
-        return await self._request("POST", "/api/v1/ingest", payload=payload, params=params, extra_headers=headers)
+        if extra_headers:
+            headers.update(extra_headers)
+        return await self._request(
+            "POST", "/api/v1/ingest", payload=payload, params=params, extra_headers=headers
+        )
 
     async def fan_out(
         self,
@@ -119,27 +134,48 @@ class AsyncHermesClient:
         payload: Dict[str, Any],
         **kwargs: Any,
     ) -> List[Dict[str, Any]]:
-        import asyncio
-        return list(await asyncio.gather(*[self.send(u, payload, **kwargs) for u in destination_urls]))
+        """Send the same payload to all destinations concurrently.
+
+        All destinations are attempted regardless of individual failures.
+        Each result dict either contains the normal ingest response (success)
+        or ``{"url": ..., "id": None, "error": "..."}`` (failure).
+        """
+        results = await asyncio.gather(
+            *[self.send(url, payload, **kwargs) for url in destination_urls],
+            return_exceptions=True,
+        )
+        out: List[Dict[str, Any]] = []
+        for url, result in zip(destination_urls, results):
+            if isinstance(result, Exception):
+                out.append({"url": url, "id": None, "error": str(result)})
+            else:
+                out.append(result)
+        return out
 
     # ── Webhooks ────────────────────────────────────────────────────────────
 
     async def get_webhook(self, webhook_id: str) -> Dict[str, Any]:
+        """Fetch a webhook record with its full delivery attempt history."""
         return await self._request("GET", f"/api/v1/webhooks/{webhook_id}")
 
-    async def list_webhooks(self, status: Optional[str] = None, limit: int = 50, offset: int = 0) -> Dict[str, Any]:
+    async def list_webhooks(
+        self, status: Optional[str] = None, limit: int = 50, offset: int = 0
+    ) -> Dict[str, Any]:
         params: Dict[str, str] = {"limit": str(limit), "offset": str(offset)}
         if status:
             params["status"] = status
         return await self._request("GET", "/api/v1/webhooks", params=params)
 
     async def replay_webhook(self, webhook_id: str) -> Dict[str, Any]:
+        """Force immediate re-delivery of a webhook."""
         return await self._request("POST", f"/api/v1/webhooks/{webhook_id}/replay")
 
     # ── DLQ ─────────────────────────────────────────────────────────────────
 
     async def list_dlq(self, limit: int = 50, offset: int = 0) -> Dict[str, Any]:
-        return await self._request("GET", "/api/v1/dlq", params={"limit": str(limit), "offset": str(offset)})
+        return await self._request(
+            "GET", "/api/v1/dlq", params={"limit": str(limit), "offset": str(offset)}
+        )
 
     async def replay_all_dlq(self) -> Dict[str, Any]:
         return await self._request("POST", "/api/v1/dlq/replay-all")
@@ -171,8 +207,53 @@ class AsyncHermesClient:
     async def list_destinations(self) -> List[Dict[str, Any]]:
         return await self._request("GET", "/api/v1/destinations")
 
+    async def get_destination(self, destination_id: str) -> Dict[str, Any]:
+        return await self._request("GET", f"/api/v1/destinations/{destination_id}")
+
     async def create_destination(self, name: str, url: str, **kwargs: Any) -> Dict[str, Any]:
-        return await self._request("POST", "/api/v1/destinations", payload={"name": name, "url": url, **kwargs})
+        return await self._request(
+            "POST", "/api/v1/destinations", payload={"name": name, "url": url, **kwargs}
+        )
+
+    async def update_destination(self, destination_id: str, **kwargs: Any) -> Dict[str, Any]:
+        """Update a destination (PUT — supply all fields you want persisted)."""
+        return await self._request(
+            "PUT", f"/api/v1/destinations/{destination_id}", payload=kwargs
+        )
 
     async def delete_destination(self, destination_id: str) -> None:
         await self._request("DELETE", f"/api/v1/destinations/{destination_id}")
+
+    # ── Event types ──────────────────────────────────────────────────────────
+
+    async def list_event_types(self) -> List[Dict[str, Any]]:
+        return await self._request("GET", "/api/v1/event-types")
+
+    async def create_event_type(self, name: str, **kwargs: Any) -> Dict[str, Any]:
+        return await self._request(
+            "POST", "/api/v1/event-types", payload={"name": name, **kwargs}
+        )
+
+    async def delete_event_type(self, event_type_id: str) -> None:
+        await self._request("DELETE", f"/api/v1/event-types/{event_type_id}")
+
+    # ── Alerts ───────────────────────────────────────────────────────────────
+
+    async def list_alerts(self) -> List[Dict[str, Any]]:
+        return await self._request("GET", "/api/v1/alerts")
+
+    async def create_alert(
+        self,
+        name: str,
+        channel_type: str,
+        config: Dict[str, Any],
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        return await self._request(
+            "POST",
+            "/api/v1/alerts",
+            payload={"name": name, "channel_type": channel_type, "config": config, **kwargs},
+        )
+
+    async def delete_alert(self, alert_id: str) -> None:
+        await self._request("DELETE", f"/api/v1/alerts/{alert_id}")

@@ -10,7 +10,7 @@ from uuid import UUID
 
 from fastapi import Request
 
-logger = logging.getLogger("hermes.sse_hub")
+logger = logging.getLogger("relora.sse_hub")
 
 
 class SSEHub:

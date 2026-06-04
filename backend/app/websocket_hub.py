@@ -10,7 +10,7 @@ from typing import Dict, Set
 
 from fastapi import WebSocket
 
-logger = logging.getLogger("hermes.ws")
+logger = logging.getLogger("relora.ws")
 
 
 class ConnectionManager:

@@ -17,7 +17,7 @@ from app.db import get_db
 from app.models import User
 from app.rate_limit import check_rate_limit
 
-logger = logging.getLogger("hermes.api")
+logger = logging.getLogger("relora.api")
 
 router = APIRouter()
 
@@ -30,7 +30,7 @@ EXCLUDED_INGEST_HEADERS = {
 
 def _set_auth_cookie(response: Response, token: str) -> None:
     response.set_cookie(
-        key="hermes_session",
+        key="relora_session",
         value=token,
         httponly=True,
         secure=settings.COOKIE_SECURE,
@@ -42,12 +42,12 @@ def _set_auth_cookie(response: Response, token: str) -> None:
 
 async def _get_token_from_request(
     request: Request,
-    hermes_session: Optional[str] = Cookie(default=None),
+    relora_session: Optional[str] = Cookie(default=None),
 ) -> Optional[str]:
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
         return auth[7:]
-    return hermes_session
+    return relora_session
 
 
 @router.post("/api/v1/auth/register", status_code=201)
@@ -95,7 +95,7 @@ async def login(
 @router.post("/api/v1/auth/logout")
 async def logout():
     response = JSONResponse(content={"message": "Logged out"})
-    response.delete_cookie("hermes_session")
+    response.delete_cookie("relora_session")
     return response
 
 
