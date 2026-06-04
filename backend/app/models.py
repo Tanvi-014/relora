@@ -233,6 +233,10 @@ class Destination(Base):
     circuit_opened_at = Column(DateTime(timezone=True), nullable=True)
     circuit_next_retry_at = Column(DateTime(timezone=True), nullable=True)
 
+    # SLO
+    slo_target_pct = Column(Float, nullable=True)          # e.g. 99.5 means 99.5% success rate
+    slo_window_minutes = Column(Integer, nullable=False, default=60)
+
     created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
 
@@ -257,6 +261,8 @@ class Destination(Base):
             "circuit_failure_count": self.circuit_failure_count,
             "circuit_opened_at": self.circuit_opened_at.isoformat() if self.circuit_opened_at else None,
             "circuit_next_retry_at": self.circuit_next_retry_at.isoformat() if self.circuit_next_retry_at else None,
+            "slo_target_pct": self.slo_target_pct,
+            "slo_window_minutes": self.slo_window_minutes,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -564,4 +570,67 @@ class AuditLog(Base):
 
     __table_args__ = (
         Index("ix_audit_log_tenant_created", "tenant_id", "created_at"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Schema drift detection
+# ---------------------------------------------------------------------------
+
+class SchemaFingerprint(Base):
+    __tablename__ = "schema_fingerprints"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(String, nullable=False)
+    source_key = Column(String(128), nullable=False)   # e.g. "stripe", event_type name
+    fingerprint = Column(String(64), nullable=False)   # SHA-256 hex of sorted key paths
+    key_structure = Column(JSONB, nullable=False)       # sorted list of dotted key paths
+    sample_payload = Column(JSONB, nullable=True)
+    first_seen_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+    last_seen_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+    event_count = Column(Integer, nullable=False, default=1)
+
+    __table_args__ = (
+        Index("ix_schema_fingerprints_tenant_source", "tenant_id", "source_key", unique=True),
+    )
+
+
+class SchemaChange(Base):
+    __tablename__ = "schema_changes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(String, nullable=False)
+    source_key = Column(String(128), nullable=False)
+    old_fingerprint = Column(String(64), nullable=True)
+    new_fingerprint = Column(String(64), nullable=False)
+    added_keys = Column(JSONB, nullable=True)
+    removed_keys = Column(JSONB, nullable=True)
+    detected_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+    acknowledged_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_schema_changes_tenant_detected", "tenant_id", "detected_at"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Destination reliability snapshots
+# ---------------------------------------------------------------------------
+
+class DestinationReliabilitySnapshot(Base):
+    __tablename__ = "destination_reliability_snapshots"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    destination_id = Column(UUID(as_uuid=True), ForeignKey("destinations.id", ondelete="CASCADE"), nullable=False)
+    date = Column(DateTime(timezone=True), nullable=False)   # date of this snapshot (truncated to day)
+    total_deliveries = Column(Integer, nullable=False, default=0)
+    successful_deliveries = Column(Integer, nullable=False, default=0)
+    failed_deliveries = Column(Integer, nullable=False, default=0)
+    avg_latency_ms = Column(Float, nullable=True)
+    p95_latency_ms = Column(Float, nullable=True)
+    success_rate = Column(Float, nullable=True)
+    computed_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+
+    __table_args__ = (
+        Index("ix_reliability_snapshots_dest_date", "destination_id", "date", unique=True),
     )

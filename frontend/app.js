@@ -235,6 +235,7 @@ function navTo(page) {
   if (page === 'analytics') loadAnalytics();
   if (page === 'ai') { /* static UI, no load needed */ }
   if (page === 'dlq-intelligence') { loadDLQIntelligence(); }
+  if (page === 'schema-drift') { loadSchemaDrift(); }
 }
 
 // Close dropdowns on outside click
@@ -275,15 +276,135 @@ async function loadDashboard() {
     const d = await apiFetch('/dashboard');
     _renderHealthBanner(d.system_status);
     _renderKPIs(d.kpis);
+    _renderHealthSplit(d.health_split || {});
+    _renderSloBreaches(d.slo_breaches || []);
+    _renderSchemaDriftAlert(d.unacked_schema_changes || 0);
     _renderIncidents(d.active_incidents || []);
     _renderSparkline(d.sparkline || []);
     _renderRecentFailures(d.recent_failures || []);
     document.getElementById('health-updated').textContent = 'Updated ' + relTime(new Date().toISOString());
   } catch (e) {
-    // Silently degrade — don't break the page on a transient error
     document.getElementById('health-banner-title').textContent = 'Unable to load health data';
     document.getElementById('health-banner-sub').textContent = e.message;
   }
+}
+
+function _renderHealthSplit(split) {
+  const el = document.getElementById('health-split');
+  if (!el) return;
+  const src = split.source_health || 'healthy';
+  const dst = split.destination_health || 'healthy';
+  const providerNote = split.provider_issue_likely
+    ? '<span class="tag tag--warn">Provider issue likely</span>' : '';
+  el.innerHTML = `
+    <div class="health-split-row">
+      <span class="health-split-label">Inbound sources</span>
+      <span class="health-split-badge health-split-badge--${src}">${src}</span>
+      ${providerNote}
+    </div>
+    <div class="health-split-row">
+      <span class="health-split-label">Outbound destinations</span>
+      <span class="health-split-badge health-split-badge--${dst}">${dst}</span>
+    </div>`;
+}
+
+function _renderSloBreaches(breaches) {
+  const el = document.getElementById('slo-breaches');
+  if (!el) return;
+  if (!breaches.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="inline-banner inline-banner--danger">
+    <strong>SLO Breach${breaches.length > 1 ? 'es' : ''}</strong>
+    ${breaches.map(b =>
+      `<span class="slo-breach-item">${esc(b.destination_name)}: ${b.current_pct.toFixed(1)}% (target ${b.target_pct}%)</span>`
+    ).join('')}
+  </div>`;
+}
+
+function _renderSchemaDriftAlert(count) {
+  const el = document.getElementById('schema-drift-alert');
+  if (!el) return;
+  if (!count) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="inline-banner inline-banner--warn">
+    <strong>${count} unacknowledged schema change${count > 1 ? 's' : ''}</strong> detected.
+    <a href="#" onclick="navigate('schema-drift');return false;">Review changes →</a>
+  </div>`;
+}
+
+// ── Event journey modal ────────────────────────────────────────────────────
+
+async function showEventJourney(eventId) {
+  if (!eventId) return;
+  try {
+    const data = await apiFetch(`/events/${encodeURIComponent(eventId)}/journey`);
+    const modal = document.getElementById('journey-modal');
+    const body = document.getElementById('journey-body');
+    if (!modal || !body) { alert(JSON.stringify(data, null, 2)); return; }
+
+    body.innerHTML = `
+      <div class="journey-header">
+        <div class="journey-meta">Event ID: <code>${esc(eventId)}</code></div>
+        <div class="journey-meta">Ingested: ${relTime(data.ingest_time)}</div>
+        <div class="journey-meta">Destinations: ${data.destination_count}
+          &nbsp;·&nbsp; <span class="status-badge status-${data.overall_status.replace('_','-')}">${data.overall_status.replace(/_/g,' ')}</span>
+        </div>
+      </div>
+      ${data.deliveries.map(d => `
+        <div class="journey-delivery">
+          <div class="journey-dest">
+            <strong>${esc(d.destination_name || d.destination_url)}</strong>
+            <span class="status-badge status-${d.status}">${d.status}</span>
+            ${d.retry_count > 0 ? `<span class="retry-count">${d.retry_count} retries</span>` : ''}
+          </div>
+          <div class="journey-attempts">
+            ${d.attempts.map(a => `
+              <div class="journey-attempt">
+                <span class="attempt-num">#${a.attempt_number}</span>
+                <span class="attempt-code ${a.status_code >= 200 && a.status_code < 300 ? 'ok' : 'err'}">${a.status_code || '—'}</span>
+                <span class="attempt-latency">${a.duration_ms ? a.duration_ms + 'ms' : ''}</span>
+                <span class="attempt-time">${relTime(a.attempted_at)}</span>
+                ${a.error_message ? `<span class="attempt-error">${esc(a.error_message.slice(0,80))}</span>` : ''}
+              </div>`).join('')}
+          </div>
+        </div>`).join('')}`;
+    modal.style.display = 'flex';
+  } catch (e) {
+    alert('Could not load journey: ' + e.message);
+  }
+}
+
+// ── Schema drift page ──────────────────────────────────────────────────────
+
+async function loadSchemaDrift() {
+  const container = document.getElementById('schema-drift-list');
+  if (!container) return;
+  container.innerHTML = '<div class="loading-state">Loading…</div>';
+  try {
+    const data = await apiFetch('/schema-changes?unacknowledged_only=false&limit=100');
+    if (!data.changes.length) {
+      container.innerHTML = '<div class="empty-state"><div class="title">No schema changes detected yet</div><div class="desc">Hermes will fingerprint every inbound payload and alert you here when the structure changes.</div></div>';
+      return;
+    }
+    container.innerHTML = `<table class="data-table"><thead><tr>
+      <th>Source</th><th>Added keys</th><th>Removed keys</th><th>Detected</th><th>Status</th><th></th>
+    </tr></thead><tbody>
+      ${data.changes.map(c => `<tr>
+        <td><code>${esc(c.source_key)}</code></td>
+        <td class="key-list added">${(c.added_keys||[]).map(k=>`<code>${esc(k)}</code>`).join(' ')}</td>
+        <td class="key-list removed">${(c.removed_keys||[]).map(k=>`<code>${esc(k)}</code>`).join(' ')}</td>
+        <td>${relTime(c.detected_at)}</td>
+        <td>${c.acknowledged_at ? '<span class="tag tag--ok">Acknowledged</span>' : '<span class="tag tag--warn">New</span>'}</td>
+        <td>${!c.acknowledged_at ? `<button class="btn btn--sm" onclick="acknowledgeSchemaChange('${c.id}')">Acknowledge</button>` : ''}</td>
+      </tr>`).join('')}
+    </tbody></table>`;
+  } catch (e) {
+    container.innerHTML = `<div class="error-state">${esc(e.message)}</div>`;
+  }
+}
+
+async function acknowledgeSchemaChange(id) {
+  await apiFetch(`/schema-changes/${id}/acknowledge`, { method: 'POST' });
+  loadSchemaDrift();
+  loadDashboard();
 }
 
 function _renderHealthBanner(status) {

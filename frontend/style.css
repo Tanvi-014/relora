@@ -1199,3 +1199,48 @@ tbody tr.selected { background: var(--accent-dim); }
 .settings-danger-desc {
   font-size: 12px; color: var(--text3); margin-bottom: 12px;
 }
+
+/* ── Health split ──────────────────────────────────────────────────────── */
+.health-split-body { padding: 12px 0 4px; }
+.health-split-row { display:flex; align-items:center; gap:10px; padding:6px 0; font-size:13px; }
+.health-split-label { flex:1; color:var(--text2); }
+.health-split-badge { font-size:11px; font-weight:600; padding:2px 8px; border-radius:4px; text-transform:uppercase; letter-spacing:.4px; }
+.health-split-badge--healthy  { background:rgba(16,185,129,.15); color:#10b981; }
+.health-split-badge--degraded { background:rgba(245,158,11,.15); color:#f59e0b; }
+.health-split-badge--critical { background:rgba(239,68,68,.15);  color:#ef4444; }
+
+/* ── SLO breach ────────────────────────────────────────────────────────── */
+.slo-breach-item { display:inline-block; margin-left:8px; font-size:12px; font-weight:500; }
+
+/* ── Tags ──────────────────────────────────────────────────────────────── */
+.tag { display:inline-block; font-size:11px; font-weight:600; padding:2px 7px; border-radius:4px; }
+.tag--ok   { background:rgba(16,185,129,.15); color:#10b981; }
+.tag--warn { background:rgba(245,158,11,.15); color:#f59e0b; }
+.tag--bad  { background:rgba(239,68,68,.15);  color:#ef4444; }
+
+/* ── Event journey ─────────────────────────────────────────────────────── */
+.journey-header { padding-bottom:12px; border-bottom:1px solid var(--border); margin-bottom:16px; }
+.journey-meta   { font-size:12px; color:var(--text3); margin-bottom:4px; }
+.journey-delivery { margin-bottom:16px; border:1px solid var(--border); border-radius:6px; overflow:hidden; }
+.journey-dest { display:flex; align-items:center; gap:8px; padding:10px 12px; background:var(--surface2); font-size:13px; }
+.journey-attempts { padding:8px 12px; }
+.journey-attempt { display:flex; align-items:center; gap:10px; padding:4px 0; font-size:12px; color:var(--text2); border-bottom:1px solid var(--border); }
+.journey-attempt:last-child { border-bottom:none; }
+.attempt-num  { width:28px; color:var(--text3); font-weight:500; }
+.attempt-code { font-weight:600; min-width:36px; }
+.attempt-code.ok  { color:#10b981; }
+.attempt-code.err { color:#ef4444; }
+.attempt-latency { color:var(--text3); min-width:50px; }
+.attempt-time   { color:var(--text3); flex:1; }
+.attempt-error  { font-size:11px; color:var(--danger); max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.retry-count    { font-size:11px; color:var(--warn); margin-left:auto; }
+
+/* ── Schema drift page ─────────────────────────────────────────────────── */
+.key-list code  { font-size:11px; background:var(--surface3); padding:1px 4px; border-radius:3px; margin-right:3px; }
+.key-list.added code   { color:#10b981; }
+.key-list.removed code { color:#ef4444; text-decoration:line-through; }
+
+/* ── Status badges ─────────────────────────────────────────────────────── */
+.status-all-delivered { background:rgba(16,185,129,.15); color:#10b981; }
+.status-all-failed    { background:rgba(239,68,68,.15);  color:#ef4444; }
+.status-partial       { background:rgba(245,158,11,.15); color:#f59e0b; }

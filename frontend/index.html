@@ -211,6 +211,19 @@
             </div>
           </div>
 
+          <!-- SLO breach + schema drift alerts -->
+          <div id="slo-breaches"></div>
+          <div id="schema-drift-alert"></div>
+
+          <!-- Source vs destination health split -->
+          <div class="card card--compact" style="margin-bottom:16px">
+            <div class="card-header">
+              <div class="card-title">Health Split</div>
+              <span class="card-meta">Source vs destination</span>
+            </div>
+            <div id="health-split" class="health-split-body"></div>
+          </div>
+
           <!-- Active incidents (hidden when none) -->
           <div id="incidents-section" style="display:none">
             <div class="section-header">
@@ -836,6 +849,19 @@
       <button class="btn btn-secondary" onclick="closeModal('modal-event-type')">Cancel</button>
       <button class="btn btn-primary" onclick="saveEventType()">Save</button>
     </div>
+  </div>
+</div>
+
+<!-- Event Journey Modal -->
+<div class="modal-overlay" id="journey-modal" onclick="if(event.target===this)this.style.display='none'">
+  <div class="modal" style="max-width:720px">
+    <div class="modal-header">
+      <div class="modal-title">Event Journey</div>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('journey-modal').style.display='none'" style="padding:4px 8px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" id="journey-body" style="max-height:60vh;overflow-y:auto"></div>
   </div>
 </div>
 

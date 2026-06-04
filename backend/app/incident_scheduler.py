@@ -24,8 +24,9 @@ from app.db import async_session
 from app.health_engine import HealthEngine
 from app.incident_engine import IncidentEngine
 from app.models import (
-    Incident, IncidentState, Webhook, Destination, 
-    CircuitState, TrendState, FailureSeverity
+    Incident, IncidentState, Webhook, Destination,
+    CircuitState, TrendState, FailureSeverity,
+    DestinationReliabilitySnapshot,
 )
 
 configure_logging = None
@@ -67,13 +68,17 @@ class IncidentScheduler:
     
     async def _run_scheduler(self):
         """Main scheduler loop."""
+        _tick = 0
         while self.running:
             try:
                 await self._check_system_health()
                 await self._auto_resolve_incidents()
+                # Compute daily reliability snapshots once per hour (every 12th tick)
+                if _tick % 12 == 0:
+                    await self._compute_reliability_snapshots()
             except Exception as e:
                 logger.error(f"Error in incident scheduler: {e}")
-            
+            _tick += 1
             # Run every 5 minutes
             await asyncio.sleep(300)
     
@@ -330,6 +335,62 @@ class IncidentScheduler:
                 logger.info("Auto-resolved recovered incidents")
         except Exception as e:
             logger.error(f"Error auto-resolving incidents: {e}")
+
+    async def _compute_reliability_snapshots(self):
+        """Compute yesterday's reliability snapshot for every active destination."""
+        from sqlalchemy import text
+        try:
+            async with async_session() as db:
+                result = await db.execute(select(Destination.id))
+                dest_ids = result.scalars().all()
+                today = datetime.now(timezone.utc).date()
+                for dest_id in dest_ids:
+                    # Skip if snapshot for today already exists
+                    existing = await db.execute(
+                        select(DestinationReliabilitySnapshot).where(
+                            DestinationReliabilitySnapshot.destination_id == dest_id,
+                            DestinationReliabilitySnapshot.date >= datetime.now(timezone.utc).replace(
+                                hour=0, minute=0, second=0, microsecond=0
+                            ),
+                        )
+                    )
+                    if existing.scalar_one_or_none():
+                        continue
+                    row = await db.execute(
+                        text("""
+                        SELECT
+                            COUNT(w.id)                                           AS total,
+                            COUNT(w.id) FILTER (WHERE w.status='completed')       AS successful,
+                            COUNT(w.id) FILTER (WHERE w.status='failed')          AS failed,
+                            AVG(da.duration_ms)                                   AS avg_latency,
+                            PERCENTILE_CONT(0.95) WITHIN GROUP
+                                (ORDER BY da.duration_ms)                         AS p95_latency
+                        FROM webhooks w
+                        LEFT JOIN delivery_attempts da ON da.webhook_id = w.id
+                        WHERE w.destination_id = :did
+                          AND w.updated_at >= NOW() - INTERVAL '24 hours'
+                        """),
+                        {"did": dest_id},
+                    )
+                    r = row.fetchone()
+                    if not r or not r.total:
+                        continue
+                    total = r.total or 0
+                    successful = r.successful or 0
+                    db.add(DestinationReliabilitySnapshot(
+                        destination_id=dest_id,
+                        date=datetime.now(timezone.utc),
+                        total_deliveries=total,
+                        successful_deliveries=successful,
+                        failed_deliveries=r.failed or 0,
+                        avg_latency_ms=float(r.avg_latency) if r.avg_latency else None,
+                        p95_latency_ms=float(r.p95_latency) if r.p95_latency else None,
+                        success_rate=round(successful / total * 100, 2) if total else None,
+                    ))
+                await db.commit()
+                logger.info("Reliability snapshots computed for %d destinations", len(dest_ids))
+        except Exception as e:
+            logger.error(f"Error computing reliability snapshots: {e}")
 
 
 # Global scheduler instance

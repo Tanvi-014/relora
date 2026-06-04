@@ -1,0 +1,12 @@
+{
+  "total_requests": 18136,
+  "errors": 9068,
+  "error_rate_pct": 50.0,
+  "throughput_rps": 604.5,
+  "latency_p50_ms": 59.6,
+  "latency_p95_ms": 99.4,
+  "latency_p99_ms": 162.5,
+  "latency_max_ms": 735.3,
+  "concurrency": 20,
+  "duration_s": 30
+}

@@ -207,6 +207,40 @@ async def get_destination_health(
     return health_data
 
 
+@router.get("/api/v1/destinations/{dest_id}/reliability-trend")
+async def reliability_trend(
+    dest_id: UUID,
+    days: int = Query(30, le=90),
+    tenant_id: str = Depends(get_tenant_from_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return daily reliability snapshots for a destination (last N days)."""
+    from app.models import DestinationReliabilitySnapshot
+    await _get_dest_for_tenant(db, dest_id, tenant_id)
+    rows = (await db.execute(
+        select(DestinationReliabilitySnapshot)
+        .where(DestinationReliabilitySnapshot.destination_id == dest_id)
+        .where(DestinationReliabilitySnapshot.date >= text(f"NOW() - INTERVAL '{days} days'"))
+        .order_by(DestinationReliabilitySnapshot.date)
+    )).scalars().all()
+    return {
+        "destination_id": str(dest_id),
+        "days": days,
+        "snapshots": [
+            {
+                "date": r.date.date().isoformat() if hasattr(r.date, "date") else str(r.date)[:10],
+                "total": r.total_deliveries,
+                "successful": r.successful_deliveries,
+                "failed": r.failed_deliveries,
+                "success_rate": r.success_rate,
+                "avg_latency_ms": r.avg_latency_ms,
+                "p95_latency_ms": r.p95_latency_ms,
+            }
+            for r in rows
+        ],
+    }
+
+
 @router.get("/api/v1/destinations/{destination_id}/incidents")
 async def get_destination_incidents(
     destination_id: UUID,

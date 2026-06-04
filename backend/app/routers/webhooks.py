@@ -136,6 +136,18 @@ async def ingest_webhook(
                 }
             )
 
+    # Schema drift detection — fire-and-forget, never blocks ingest
+    if isinstance(payload, dict):
+        import asyncio as _asyncio
+        from app.schema_drift import check_and_update as _check_drift
+        source_key = (
+            request.headers.get("X-Source-Key")
+            or signature_provider
+            or event_type_name
+            or "unknown"
+        )
+        _asyncio.create_task(_check_drift(db, tenant_id, source_key, payload))
+
     # Resolve ordering_key from payload field if it looks like a path
     if ordering_key and isinstance(payload, dict) and "." in ordering_key:
         from app.routing import get_path

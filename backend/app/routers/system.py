@@ -321,10 +321,70 @@ async def get_dashboard(
         for r in spark_result.fetchall()
     ]
 
+    # ── Source vs destination health split ────────────────────────────────
+    # Provider issue heuristic: if N≥2 distinct destinations fail on the same
+    # event_id within 10 minutes, the problem is likely upstream, not local.
+    provider_issue_result = await db.execute(
+        text("""
+        SELECT
+            COUNT(DISTINCT w.destination_id) AS dest_count,
+            COUNT(DISTINCT w.event_id)       AS event_count
+        FROM webhooks w
+        WHERE w.tenant_id = :tid
+          AND w.status = 'failed'
+          AND w.updated_at >= NOW() - INTERVAL '24 hours'
+          AND w.event_id IS NOT NULL
+          AND w.destination_id IS NOT NULL
+        HAVING COUNT(DISTINCT w.destination_id) >= 2
+        """),
+        {"tid": tenant_id},
+    )
+    pi_row = provider_issue_result.fetchone()
+    provider_issue_likely = pi_row is not None and (pi_row.dest_count or 0) >= 2
+
+    source_health = "healthy"
+    destination_health = "healthy"
+    if provider_issue_likely:
+        source_health = "degraded"
+    if has_open_circuit or failed_24h > 10:
+        destination_health = "degraded" if failed_24h <= 50 else "critical"
+
+    # ── SLO summary ───────────────────────────────────────────────────────
+    from app.routers.slo import calculate_slo as _calc_slo
+    slo_result = await db.execute(
+        text("""
+        SELECT d.id, d.name, d.slo_target_pct, d.slo_window_minutes
+        FROM destinations d
+        JOIN projects p ON p.id = d.project_id
+        WHERE p.api_key = :key AND d.slo_target_pct IS NOT NULL
+        """),
+        {"key": tenant_id},
+    )
+    slo_rows = slo_result.fetchall()
+    slo_breaches = []
+    for sr in slo_rows:
+        metrics = await _calc_slo(db, sr.id, sr.slo_window_minutes or 60)
+        if metrics["current_success_pct"] < sr.slo_target_pct:
+            slo_breaches.append({
+                "destination_name": sr.name,
+                "target_pct": sr.slo_target_pct,
+                "current_pct": metrics["current_success_pct"],
+            })
+
+    # ── Unacknowledged schema changes ─────────────────────────────────────
+    from app.models import SchemaChange
+    sc_count_result = await db.execute(
+        select(func.count(SchemaChange.id)).where(
+            SchemaChange.tenant_id == tenant_id,
+            SchemaChange.acknowledged_at.is_(None),
+        )
+    )
+    unacked_schema_changes = sc_count_result.scalar() or 0
+
     # ── Overall system status ──
     has_open_circuit = cb_summary["open"] > 0
     has_critical_incident = any(i["severity"] == "critical" for i in active_incidents)
-    if failed_24h > 50 or has_critical_incident:
+    if failed_24h > 50 or has_critical_incident or slo_breaches:
         system_status = "critical"
     elif failed_24h > 10 or has_open_circuit or active_incidents:
         system_status = "degraded"
@@ -340,6 +400,13 @@ async def get_dashboard(
             "circuit_breakers": cb_summary,
             "open_destinations": open_destinations,
         },
+        "health_split": {
+            "source_health": source_health,
+            "destination_health": destination_health,
+            "provider_issue_likely": provider_issue_likely,
+        },
+        "slo_breaches": slo_breaches,
+        "unacked_schema_changes": unacked_schema_changes,
         "active_incidents": active_incidents,
         "recent_failures": recent_failures,
         "sparkline": sparkline,
