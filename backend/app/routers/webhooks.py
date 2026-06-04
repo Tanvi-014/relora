@@ -293,6 +293,7 @@ async def get_webhook(
 
 @router.post("/api/v1/webhooks/{webhook_id}/replay")
 async def replay_webhook(
+    request: Request,
     webhook_id: UUID,
     tenant_id: str = Depends(get_tenant_from_auth),
     db: AsyncSession = Depends(get_db),
@@ -307,6 +308,8 @@ async def replay_webhook(
     wh.retry_count = 0
     wh.next_attempt_at = datetime.now(timezone.utc)
     wh.updated_at = datetime.now(timezone.utc)
+    from app.audit import audit as _audit
+    await _audit(db, request, tenant_id, "REPLAY", "webhook", str(webhook_id))
     await db.commit()
     logger.info("Replay triggered", extra={"event": "webhook.replay.requested", "webhook_id": str(webhook_id)})
     return {"success": True, "message": "Rescheduled for immediate delivery"}

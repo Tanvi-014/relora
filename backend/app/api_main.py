@@ -109,10 +109,50 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title=settings.APP_NAME,
-    description="Production-grade webhook delivery middleware.",
+    title="Hermes Webhook Delivery Middleware",
+    description="""
+**Hermes** is a self-hosted, production-grade webhook relay and delivery engine.
+
+It sits between webhook publishers (Stripe, GitHub, Shopify, internal services) and
+your application, accepting events immediately and delivering them asynchronously with
+exponential retry, circuit breaking, fan-out routing, and a full DLQ intelligence layer.
+
+## Key capabilities
+
+- **Guaranteed delivery** — at-least-once delivery with exponential backoff and configurable retries
+- **Circuit breaker** — per-destination open/half-open/closed state machine prevents thundering herd
+- **DLQ Intelligence** — automatic failure classification, incident lifecycle, and 0-100 health scoring
+- **Fan-out routing** — broadcast one inbound event to N destinations in a single API call
+- **Filtering & transforms** — drop or reshape payloads before delivery with expression-based rules
+- **Cloud adapters** — native ingest from AWS SNS, GCP Pub/Sub, and Azure Event Grid
+- **Audit log** — tamper-evident record of every config mutation, queryable via API
+- **Standard Webhooks** — HMAC-SHA256 outbound signing (svix-compatible)
+
+## Authentication
+
+All endpoints (except `/health`) require either:
+- **JWT cookie** — obtained via `POST /auth/login` (SaaS dashboard users)
+- **API key header** — `X-Hermes-API-Key: <key>` (programmatic / SDK access)
+""",
     version="2.0.0",
     lifespan=lifespan,
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json",
+    openapi_tags=[
+        {"name": "ingest", "description": "Webhook ingestion — the hot path. Returns immediately after writing to Postgres."},
+        {"name": "webhooks", "description": "Query and manage webhook records and delivery attempts."},
+        {"name": "destinations", "description": "Registered delivery targets with circuit breaker state and per-destination config."},
+        {"name": "dlq", "description": "Dead Letter Queue — inspect, analyse, and replay permanently failed webhooks."},
+        {"name": "alerts", "description": "Alert channel configuration — Slack, email, and webhook notifications on DLQ events."},
+        {"name": "event-types", "description": "Event type catalog with optional JSON Schema validation."},
+        {"name": "projects", "description": "Project management and API key administration."},
+        {"name": "auth", "description": "User registration, login, and session management."},
+        {"name": "ai", "description": "Claude-powered DLQ analysis, filter suggestions, and transform generation."},
+        {"name": "simulator", "description": "Generate realistic test payloads for Stripe, GitHub, Shopify, and more."},
+        {"name": "system", "description": "Health, metrics, stats, audit log, and real-time streaming endpoints."},
+        {"name": "sources", "description": "Cloud event source adapters — AWS SNS, GCP Pub/Sub, Azure Event Grid."},
+    ],
 )
 
 app.add_middleware(SecurityHeadersMiddleware)

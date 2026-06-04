@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, func, desc
 from uuid import UUID
 
+from fastapi import Request
+from app.audit import audit
 from app.auth import get_tenant_from_auth
 from app.db import get_db
 from app.destination_health import DestinationHealthAnalyzer
@@ -56,6 +58,7 @@ async def list_destinations(
 
 @router.post("/api/v1/destinations", status_code=201)
 async def create_destination(
+    request: Request,
     body: DestinationCreate,
     tenant_id: str = Depends(get_tenant_from_auth),
     db: AsyncSession = Depends(get_db),
@@ -79,6 +82,8 @@ async def create_destination(
         custom_headers=body.custom_headers,
     )
     db.add(dest)
+    await db.flush()
+    await audit(db, request, tenant_id, "CREATE", "destination", str(dest.id), after=dest.to_dict())
     try:
         await db.commit()
     except IntegrityError:
@@ -100,18 +105,21 @@ async def get_destination(
 
 @router.put("/api/v1/destinations/{dest_id}")
 async def update_destination(
+    request: Request,
     dest_id: UUID,
     body: DestinationUpdate,
     tenant_id: str = Depends(get_tenant_from_auth),
     db: AsyncSession = Depends(get_db),
 ):
     dest = await _get_dest_for_tenant(db, dest_id, tenant_id)
+    before = dest.to_dict()
     update_data = body.model_dump(exclude_unset=True)
     if "url" in update_data:
         validate_destination_url(update_data["url"])
     for field, value in update_data.items():
         setattr(dest, field, value)
     dest.updated_at = datetime.now(timezone.utc)
+    await audit(db, request, tenant_id, "UPDATE", "destination", str(dest_id), before=before, after=dest.to_dict())
     await db.commit()
     await db.refresh(dest)
     return dest.to_dict()
@@ -119,11 +127,13 @@ async def update_destination(
 
 @router.delete("/api/v1/destinations/{dest_id}", status_code=204)
 async def delete_destination(
+    request: Request,
     dest_id: UUID,
     tenant_id: str = Depends(get_tenant_from_auth),
     db: AsyncSession = Depends(get_db),
 ):
     dest = await _get_dest_for_tenant(db, dest_id, tenant_id)
+    await audit(db, request, tenant_id, "DELETE", "destination", str(dest_id), before=dest.to_dict())
     await db.delete(dest)
     await db.commit()
     return Response(status_code=204)

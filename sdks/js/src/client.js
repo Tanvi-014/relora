@@ -1,125 +1,176 @@
 /**
- * Official JavaScript SDK client for Hermes Webhook Delivery Middleware.
- * Compatible with Node.js (18+), Browsers, Deno, and Cloudflare Workers.
+ * Hermes Webhook Delivery Middleware — JavaScript SDK
+ * Compatible with Node.js 18+, browsers, Deno, and Cloudflare Workers.
+ * Zero external dependencies — uses the platform fetch API.
  */
-class Hermes {
-  /**
-   * Initializes the Hermes client.
-   * @param {string} baseUrl - The URL of the Hermes instance (e.g. "http://localhost:8000")
-   * @param {object} [options] - Additional options
-   * @param {string} [options.apiKey] - The API key for tenant verification
-   */
-  constructor(baseUrl, options = {}) {
-    this.baseUrl = baseUrl.replace(/\/+$/, '');
-    this.apiKey = options.apiKey || null;
-  }
 
-  /**
-   * Ingests a webhook event through Hermes for high-reliability forwarding.
-   * @param {string} destinationUrl - The downstream destination URL for this webhook
-   * @param {object} payload - The JSON payload object
-   * @param {object} [options] - Optional configurations
-   * @param {object} [options.headers] - Custom headers to forward to the destination
-   * @param {string} [options.idempotencyKey] - Unique key to guarantee exactly-once delivery
-   * @param {string} [options.filter] - Conditional event filter expression
-   * @param {object|string} [options.transform] - Custom mapping to reshape the payload
-   * @param {string} [options.signatureProvider] - Optional provider (stripe, github, hermes)
-   * @returns {Promise<object>} Response containing ingestion status and webhook ID
-   */
-  async send(destinationUrl, payload, options = {}) {
-    const url = new URL(`${this.baseUrl}/api/v1/ingest`);
-
-    if (destinationUrl) url.searchParams.set('url', destinationUrl);
-    if (options.filter) url.searchParams.set('filter', options.filter);
-    if (options.transform) {
-      const transformVal = typeof options.transform === 'object'
-        ? JSON.stringify(options.transform)
-        : options.transform;
-      url.searchParams.set('transform', transformVal);
-    }
-    if (options.signatureProvider) {
-      url.searchParams.set('signature_provider', options.signatureProvider);
-    }
-
-    const headers = {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-    };
-
-    if (this.apiKey) {
-      headers['X-Hermes-API-Key'] = this.apiKey;
-    }
-    if (options.idempotencyKey) {
-      headers['Idempotency-Key'] = options.idempotencyKey;
-    }
-
-    // Pass custom headers through to destination
-    if (options.headers) {
-      for (const [key, value] of Object.entries(options.headers)) {
-        headers[key] = value;
-      }
-    }
-
-    try {
-      const res = await fetch(url.toString(), {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(payload)
-      });
-
-      const body = await res.json();
-      if (!res.ok) {
-        throw new Error(body.detail || `HTTP Error ${res.status}`);
-      }
-      return body;
-    } catch (err) {
-      throw new Error(`Hermes Ingestion Failed: ${err.message}`);
-    }
-  }
-
-  /**
-   * Retrieves detailed execution status and delivery attempts logs for a webhook.
-   * @param {string} webhookId - The UUID of the webhook
-   * @returns {Promise<object>}
-   */
-  async getWebhook(webhookId) {
-    const url = `${this.baseUrl}/api/v1/webhooks/${webhookId}`;
-    const headers = {};
-    if (this.apiKey) {
-      headers['X-Hermes-API-Key'] = this.apiKey;
-    }
-
-    try {
-      const res = await fetch(url, { headers });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.detail || `HTTP Error ${res.status}`);
-      return body;
-    } catch (err) {
-      throw new Error(`Failed to fetch webhook details: ${err.message}`);
-    }
-  }
-
-  /**
-   * Manually forces immediate replay of a failed/DLQ webhook.
-   * @param {string} webhookId - The UUID of the webhook
-   * @returns {Promise<object>}
-   */
-  async replayWebhook(webhookId) {
-    const url = `${this.baseUrl}/api/v1/webhooks/${webhookId}/replay`;
-    const headers = {};
-    if (this.apiKey) {
-      headers['X-Hermes-API-Key'] = this.apiKey;
-    }
-
-    try {
-      const res = await fetch(url, { method: 'POST', headers });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.detail || `HTTP Error ${res.status}`);
-      return body;
-    } catch (err) {
-      throw new Error(`Failed to replay webhook: ${err.message}`);
-    }
+export class HermesError extends Error {
+  /** @param {number} statusCode @param {string} detail */
+  constructor(statusCode, detail) {
+    super(`HTTP ${statusCode}: ${detail}`);
+    this.statusCode = statusCode;
+    this.detail = detail;
+    this.name = 'HermesError';
   }
 }
 
-module.exports = { Hermes };
+export class Hermes {
+  /**
+   * @param {string} baseUrl - Hermes instance URL, e.g. "http://localhost:8000"
+   * @param {{ apiKey?: string, timeout?: number }} [options]
+   */
+  constructor(baseUrl, options = {}) {
+    this.baseUrl = baseUrl.replace(/\/+$/, '');
+    this.apiKey = options.apiKey ?? null;
+    this.timeout = options.timeout ?? 15_000;
+  }
+
+  /** @returns {Record<string, string>} */
+  _headers(extra = {}) {
+    const h = { 'Content-Type': 'application/json', Accept: 'application/json' };
+    if (this.apiKey) h['X-Hermes-API-Key'] = this.apiKey;
+    return { ...h, ...extra };
+  }
+
+  /**
+   * @param {string} method
+   * @param {string} path
+   * @param {{ body?: unknown, params?: Record<string, string>, headers?: Record<string, string> }} [opts]
+   */
+  async _request(method, path, { body, params, headers } = {}) {
+    const url = new URL(`${this.baseUrl}${path}`);
+    if (params) Object.entries(params).forEach(([k, v]) => v != null && url.searchParams.set(k, v));
+
+    const init = { method, headers: this._headers(headers) };
+    if (body !== undefined) init.body = JSON.stringify(body);
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeout);
+    init.signal = controller.signal;
+
+    try {
+      const res = await fetch(url.toString(), init);
+      clearTimeout(timer);
+      const text = await res.text();
+      const parsed = text ? JSON.parse(text) : {};
+      if (!res.ok) throw new HermesError(res.status, parsed.detail ?? text);
+      return parsed;
+    } catch (err) {
+      clearTimeout(timer);
+      if (err instanceof HermesError) throw err;
+      throw new HermesError(0, err.message);
+    }
+  }
+
+  // ── Ingest ────────────────────────────────────────────────────────────────
+
+  /**
+   * Ingest a webhook event for reliable delivery.
+   * @param {string} destinationUrl
+   * @param {Record<string, unknown>} payload
+   * @param {{
+   *   idempotencyKey?: string,
+   *   filter?: string,
+   *   transform?: Record<string, string>,
+   *   orderingKey?: string,
+   *   signatureProvider?: string,
+   *   destinationId?: string,
+   * }} [options]
+   */
+  async send(destinationUrl, payload, options = {}) {
+    const params = { url: destinationUrl };
+    if (options.filter) params.filter = options.filter;
+    if (options.transform) params.transform = JSON.stringify(options.transform);
+    if (options.orderingKey) params.ordering_key = options.orderingKey;
+    if (options.signatureProvider) params.signature_provider = options.signatureProvider;
+    if (options.destinationId) params.destination_id = options.destinationId;
+    const headers = {};
+    if (options.idempotencyKey) headers['Idempotency-Key'] = options.idempotencyKey;
+    return this._request('POST', '/api/v1/ingest', { body: payload, params, headers });
+  }
+
+  /**
+   * Send the same payload to multiple destinations concurrently.
+   * @param {string[]} destinationUrls
+   * @param {Record<string, unknown>} payload
+   * @param {object} [options]
+   */
+  async fanOut(destinationUrls, payload, options = {}) {
+    return Promise.all(destinationUrls.map(url => this.send(url, payload, options)));
+  }
+
+  // ── Webhooks ──────────────────────────────────────────────────────────────
+
+  /** @param {string} webhookId */
+  async getWebhook(webhookId) {
+    return this._request('GET', `/api/v1/webhooks/${webhookId}`);
+  }
+
+  /** @param {{ status?: string, limit?: number, offset?: number }} [opts] */
+  async listWebhooks({ status, limit = 50, offset = 0 } = {}) {
+    return this._request('GET', '/api/v1/webhooks', {
+      params: { ...(status ? { status } : {}), limit: String(limit), offset: String(offset) },
+    });
+  }
+
+  /** @param {string} webhookId */
+  async replayWebhook(webhookId) {
+    return this._request('POST', `/api/v1/webhooks/${webhookId}/replay`);
+  }
+
+  // ── DLQ ───────────────────────────────────────────────────────────────────
+
+  /** @param {{ limit?: number, offset?: number }} [opts] */
+  async listDlq({ limit = 50, offset = 0 } = {}) {
+    return this._request('GET', '/api/v1/dlq', {
+      params: { limit: String(limit), offset: String(offset) },
+    });
+  }
+
+  async replayAllDlq() {
+    return this._request('POST', '/api/v1/dlq/replay-all');
+  }
+
+  async dlqHealth() {
+    return this._request('GET', '/api/v1/dlq/health');
+  }
+
+  // ── Stats & audit ─────────────────────────────────────────────────────────
+
+  async getStats() {
+    return this._request('GET', '/api/v1/stats');
+  }
+
+  /**
+   * @param {{ resourceType?: string, action?: string, limit?: number, offset?: number }} [opts]
+   */
+  async getAuditLog({ resourceType, action, limit = 50, offset = 0 } = {}) {
+    return this._request('GET', '/api/v1/audit-log', {
+      params: {
+        limit: String(limit),
+        offset: String(offset),
+        ...(resourceType ? { resource_type: resourceType } : {}),
+        ...(action ? { action } : {}),
+      },
+    });
+  }
+
+  // ── Destinations ──────────────────────────────────────────────────────────
+
+  async listDestinations() {
+    return this._request('GET', '/api/v1/destinations');
+  }
+
+  /** @param {{ name: string, url: string, [key: string]: unknown }} body */
+  async createDestination(body) {
+    return this._request('POST', '/api/v1/destinations', { body });
+  }
+
+  /** @param {string} destinationId */
+  async deleteDestination(destinationId) {
+    return this._request('DELETE', `/api/v1/destinations/${destinationId}`);
+  }
+}
+
+// CommonJS compat shim — works alongside the ESM export above when bundled
+if (typeof module !== 'undefined') module.exports = { Hermes, HermesError };

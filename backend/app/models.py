@@ -546,3 +546,22 @@ class Incident(Base):
         Index("ix_incidents_state", "state"),
         Index("ix_incidents_first_seen_at", "first_seen_at"),
     )
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_log"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(String, nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), nullable=True)
+    action = Column(String(32), nullable=False)        # CREATE UPDATE DELETE REPLAY
+    resource_type = Column(String(64), nullable=False) # destination webhook alert_config project
+    resource_id = Column(String, nullable=True)
+    changes = Column(JSONB, nullable=True)             # {"before": {...}, "after": {...}}
+    ip_address = Column(String(64), nullable=True)
+    user_agent = Column(String(256), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+
+    __table_args__ = (
+        Index("ix_audit_log_tenant_created", "tenant_id", "created_at"),
+    )

@@ -1,22 +1,27 @@
 {
   "name": "hermes-middleware-sdk",
   "version": "1.0.0",
-  "description": "Official JavaScript/TypeScript SDK for the Hermes Webhook Delivery Middleware proxy.",
+  "description": "Official JavaScript/TypeScript SDK for the Hermes Webhook Delivery Middleware.",
   "main": "src/client.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 0"
+  "module": "src/client.js",
+  "types": "src/client.d.ts",
+  "exports": {
+    ".": {
+      "import": "./src/client.js",
+      "require": "./src/client.js",
+      "types": "./src/client.d.ts"
+    }
   },
-  "keywords": [
-    "hermes",
-    "webhook",
-    "delivery",
-    "retry",
-    "middleware",
-    "sdk"
-  ],
+  "scripts": {
+    "test": "node --test src/client.test.js"
+  },
+  "keywords": ["hermes", "webhook", "delivery", "middleware", "retry", "dlq", "sdk"],
   "author": "Hermes Middleware Team",
   "license": "MIT",
-  "engines": {
-    "node": ">=18.0.0"
+  "engines": { "node": ">=18.0.0" },
+  "files": ["src/", "README.md"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/hermes"
   }
 }

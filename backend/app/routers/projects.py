@@ -1,10 +1,11 @@
 import uuid as _uuid_mod
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 
+from app.audit import audit
 from app.auth import get_current_user, require_project_role
 from app.db import get_db
 from app.models import Project, ProjectMember, User
@@ -47,6 +48,7 @@ async def list_projects(current_user: User = Depends(get_current_user), db: Asyn
 
 @router.post("/api/v1/projects", status_code=201)
 async def create_project(
+    request: Request,
     name: str = Body(..., embed=True),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -55,6 +57,7 @@ async def create_project(
     db.add(project)
     await db.flush()
     db.add(ProjectMember(project_id=project.id, user_id=current_user.id, role="owner"))
+    await audit(db, request, str(current_user.id), "CREATE", "project", str(project.id), after={"name": name})
     await db.commit()
     await db.refresh(project)
     d = project.to_dict()
@@ -88,6 +91,7 @@ async def get_project(
 
 @router.delete("/api/v1/projects/{project_id}", status_code=204)
 async def delete_project(
+    request: Request,
     project_id: UUID,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -98,6 +102,7 @@ async def delete_project(
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(404, "Project not found")
+    await audit(db, request, str(current_user.id), "DELETE", "project", str(project_id), before=project.to_dict())
     await db.delete(project)
     await db.commit()
     return Response(status_code=204)

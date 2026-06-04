@@ -3,6 +3,13 @@ import pytest
 from fastapi import HTTPException
 from uuid import uuid4
 
+
+def _mock_request():
+    req = MagicMock()
+    req.headers = {"User-Agent": "test", "X-Forwarded-For": ""}
+    req.client = None
+    return req
+
 from app.models import AlertConfig
 from app.schemas import AlertConfigCreate, AlertConfigUpdate
 from app.routers.alerts import (
@@ -53,7 +60,8 @@ async def test_create_alert_config():
         enabled=True,
     )
 
-    with patch("app.routers.alerts.AlertConfig") as mock_alert_class:
+    with patch("app.routers.alerts.AlertConfig") as mock_alert_class, \
+         patch("app.routers.alerts.audit", new_callable=AsyncMock):
         mock_alert_instance = MagicMock()
         mock_alert_instance.to_dict.return_value = {
             "id": "mock-uuid",
@@ -71,7 +79,7 @@ async def test_create_alert_config():
         }
         mock_alert_class.return_value = mock_alert_instance
 
-        result = await create_alert(config_in=config_in, tenant_id="test_tenant", db=mock_db)
+        result = await create_alert(request=_mock_request(), config_in=config_in, tenant_id="test_tenant", db=mock_db)
         assert result["name"] == "Ops Email"
         assert result["config"]["password"] == "••••••••"
         mock_db.add.assert_called_once()
@@ -125,9 +133,11 @@ async def test_update_alert_config_prevents_secret_overwrite():
         enabled=False,
     )
 
-    with patch("app.routers.alerts.func") as mock_func:
+    with patch("app.routers.alerts.func") as mock_func, \
+         patch("app.routers.alerts.audit", new_callable=AsyncMock):
         mock_func.now.return_value = None
         await update_alert(
+            request=_mock_request(),
             alert_id=alert_id,
             config_in=config_update,
             tenant_id="test_tenant",
@@ -156,7 +166,8 @@ async def test_delete_alert_config():
     mock_result.scalar_one_or_none.return_value = existing_config
     mock_db.execute.return_value = mock_result
 
-    response = await delete_alert(alert_id=alert_id, tenant_id="test_tenant", db=mock_db)
+    with patch("app.routers.alerts.audit", new_callable=AsyncMock):
+        response = await delete_alert(request=_mock_request(), alert_id=alert_id, tenant_id="test_tenant", db=mock_db)
     assert response.status_code == 204
     mock_db.delete.assert_called_once_with(existing_config)
     mock_db.commit.assert_called_once()

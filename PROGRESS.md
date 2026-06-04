@@ -478,6 +478,13 @@ Complete visual redesign of the Hermes dashboard. The previous UI had patterns t
 | `.env.example` | ✅ | `ALLOW_PRIVATE_DESTINATIONS=false`, full production checklist with `[PROD]` markers |
 | Billing enforcement | ✅ | `MONTHLY_EVENT_QUOTA` config; hard HTTP 429 cutoff at ingest when set; 0=unlimited for self-hosted |
 | Container ops | ✅ | Worker `stop_grace_period: 40s`; `FORCE_HTTPS`/`COOKIE_SECURE` env-driven in compose; real worker healthcheck |
+| Audit log | ✅ | `audit_log` table (migration 0009); `audit.py` flush-before-commit; `GET /api/v1/audit-log`; wired into destinations CREATE/UPDATE/DELETE |
+| CLI | ✅ | `hermes` Click CLI — ingest, status, stats, dlq (list/replay/replay-all/health), audit, listen (local tunnel) |
+| Python SDK | ✅ | `pyproject.toml` (pip-publishable); sync `HermesClient` + async `AsyncHermesClient`; full type hints; send/fan_out/dlq/audit/destinations |
+| JS SDK | ✅ | ESM+CJS dual export; `client.d.ts` TypeScript definitions; full method parity with Python SDK |
+| Load test | ✅ | `benchmark/loadtest.py` — asyncio+httpx, configurable concurrency/duration, P50/P95/P99, JSON result output |
+| OpenAPI docs | ✅ | Full description, 12 tagged endpoint groups, `/api/docs` Swagger UI, `/api/redoc` Redoc |
+| README | ✅ | Complete overhaul — quickstart, feature table vs DIY, architecture diagram, config reference, production deploy, SDK examples, CLI reference, benchmark instructions |
 
 ---
 
@@ -551,6 +558,14 @@ Complete visual redesign of the Hermes dashboard. The previous UI had patterns t
 | 2026-06-04 | 14 | Added stop_grace_period: 40s to worker service (covers the 35s drain window) |
 | 2026-06-04 | 14 | Fixed worker healthcheck: was always-pass no-op; now checks /proc/1/stat for zombie state |
 | 2026-06-04 | 14 | Confirmed schema_validator.py and sse_hub.py fully wired (routers/webhooks, routers/event_types, worker, routers/system) |
+| 2026-06-04 | 14 | Added audit_log table (migration 0009), AuditLog model, audit.py module; wired into destinations CREATE/UPDATE/DELETE |
+| 2026-06-04 | 14 | Added GET /api/v1/audit-log endpoint with resource_type, action, pagination filters |
+| 2026-06-04 | 14 | Built hermes CLI: ingest, status, stats, dlq (list/replay/replay-all/health), audit, listen (local tunnel); installable via pip install ./cli |
+| 2026-06-04 | 14 | Modernized Python SDK: pyproject.toml, HermesError, AsyncHermesClient, fan_out, dlq_health, get_audit_log, list_destinations |
+| 2026-06-04 | 14 | Modernized JS SDK: ESM+CJS dual export, TypeScript client.d.ts, full method parity, HermesError class, AbortController timeout |
+| 2026-06-04 | 14 | Added benchmark/loadtest.py: asyncio+httpx, configurable concurrency/duration, P50/P95/P99 output, last_result.json |
+| 2026-06-04 | 14 | Enhanced FastAPI OpenAPI metadata: full description, auth docs, 12 tagged endpoint groups, /api/docs + /api/redoc |
+| 2026-06-04 | 14 | Overhauled README: feature table vs DIY/hosted, quickstart, architecture, config reference, production deploy, SDK+CLI examples |
 | 2026-06-03 | 13 | Deleted orphaned dlq-intelligence.html and dlq-intelligence.js |
 | 2026-06-03 | 13 | Fixed .env.example: ALLOW_PRIVATE_DESTINATIONS=false, full [PROD] checklist |
 | 2026-06-03 | 13 | Test suite: 95/95 passing, 0 errors |

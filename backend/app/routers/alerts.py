@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 
 from app.alerts import _send_email_alert, _send_slack_alert
+from app.audit import audit
 from app.auth import get_tenant_from_auth
 from app.db import get_db
 from app.models import AlertConfig
@@ -22,6 +23,7 @@ async def list_alerts(tenant_id: str = Depends(get_tenant_from_auth), db: AsyncS
 
 @router.post("/api/v1/alerts", status_code=201)
 async def create_alert(
+    request: Request,
     config_in: AlertConfigCreate,
     tenant_id: str = Depends(get_tenant_from_auth),
     db: AsyncSession = Depends(get_db),
@@ -34,6 +36,8 @@ async def create_alert(
         enabled=config_in.enabled if config_in.enabled is not None else True,
     )
     db.add(config)
+    await db.flush()
+    await audit(db, request, tenant_id, "CREATE", "alert_config", str(config.id), after=config.to_dict())
     await db.commit()
     await db.refresh(config)
     return config.to_dict()
@@ -52,6 +56,7 @@ async def get_alert(alert_id: UUID, tenant_id: str = Depends(get_tenant_from_aut
 
 @router.put("/api/v1/alerts/{alert_id}")
 async def update_alert(
+    request: Request,
     alert_id: UUID,
     config_in: AlertConfigUpdate,
     tenant_id: str = Depends(get_tenant_from_auth),
@@ -63,6 +68,7 @@ async def update_alert(
     config = result.scalar_one_or_none()
     if not config:
         raise HTTPException(404, "Alert not found")
+    before = config.to_dict()
     if config_in.name is not None:
         config.name = config_in.name
     if config_in.config is not None:
@@ -77,19 +83,21 @@ async def update_alert(
     if config_in.enabled is not None:
         config.enabled = config_in.enabled
     config.updated_at = func.now()
+    await audit(db, request, tenant_id, "UPDATE", "alert_config", str(alert_id), before=before, after=config.to_dict())
     await db.commit()
     await db.refresh(config)
     return config.to_dict()
 
 
 @router.delete("/api/v1/alerts/{alert_id}", status_code=204)
-async def delete_alert(alert_id: UUID, tenant_id: str = Depends(get_tenant_from_auth), db: AsyncSession = Depends(get_db)):
+async def delete_alert(request: Request, alert_id: UUID, tenant_id: str = Depends(get_tenant_from_auth), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(AlertConfig).where(AlertConfig.id == alert_id, AlertConfig.tenant_id == tenant_id)
     )
     config = result.scalar_one_or_none()
     if not config:
         raise HTTPException(404, "Alert not found")
+    await audit(db, request, tenant_id, "DELETE", "alert_config", str(alert_id), before=config.to_dict())
     await db.delete(config)
     await db.commit()
     return Response(status_code=204)

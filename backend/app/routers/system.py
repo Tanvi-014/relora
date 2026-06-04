@@ -14,7 +14,7 @@ from sqlalchemy import text
 from app.auth import get_tenant_from_auth
 from app.db import get_db
 from app.health_engine import HealthEngine
-from app.models import DeliveryAttempt, Destination, Project, ProjectMember, Webhook
+from app.models import AuditLog, DeliveryAttempt, Destination, Project, ProjectMember, Webhook
 from app.sse_hub import sse_hub
 from app.websocket_hub import ws_manager
 
@@ -427,3 +427,40 @@ async def websocket_endpoint(
         pass
     finally:
         await ws_manager.disconnect(websocket, project_key)
+
+
+@router.get("/api/v1/audit-log")
+async def get_audit_log(
+    resource_type: Optional[str] = Query(None),
+    action: Optional[str] = Query(None),
+    limit: int = Query(50, le=500),
+    offset: int = Query(0, ge=0),
+    tenant_id: str = Depends(get_tenant_from_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return paginated audit log entries for this tenant, newest first."""
+    from sqlalchemy import desc as _desc
+    stmt = select(AuditLog).where(AuditLog.tenant_id == tenant_id)
+    if resource_type:
+        stmt = stmt.where(AuditLog.resource_type == resource_type)
+    if action:
+        stmt = stmt.where(AuditLog.action == action)
+    stmt = stmt.order_by(_desc(AuditLog.created_at)).offset(offset).limit(limit)
+    rows = (await db.execute(stmt)).scalars().all()
+    return {
+        "entries": [
+            {
+                "id": str(r.id),
+                "action": r.action,
+                "resource_type": r.resource_type,
+                "resource_id": r.resource_id,
+                "changes": r.changes,
+                "ip_address": r.ip_address,
+                "user_agent": r.user_agent,
+                "created_at": r.created_at.isoformat(),
+            }
+            for r in rows
+        ],
+        "limit": limit,
+        "offset": offset,
+    }

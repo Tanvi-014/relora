@@ -1,129 +1,192 @@
+"""Synchronous Hermes SDK client — zero external dependencies."""
+from __future__ import annotations
+
 import json
+import urllib.error
 import urllib.parse
 import urllib.request
-import urllib.error
 from typing import Any, Dict, List, Optional
 
+
+class HermesError(Exception):
+    def __init__(self, status_code: int, detail: str) -> None:
+        self.status_code = status_code
+        self.detail = detail
+        super().__init__(f"HTTP {status_code}: {detail}")
+
+
 class HermesClient:
+    """Synchronous client for the Hermes Webhook Delivery Middleware.
+
+    Zero external dependencies — uses the Python standard library only.
+
+    Example::
+
+        from hermes import HermesClient
+        client = HermesClient("http://localhost:8000", api_key="hk_...")
+        result = client.send(destination_url="https://myapp.com/hook",
+                             payload={"event": "order.created"})
+        print(result["id"])
     """
-    Official Python SDK client for Hermes Webhook Delivery Middleware.
-    Designed with zero external dependencies using the Python standard library.
-    """
-    def __init__(self, base_url: str, api_key: Optional[str] = None, default_tenant_id: str = "anonymous"):
-        """
-        Initializes the Hermes client.
-        
-        :param base_url: The URL of the Hermes instance (e.g. "http://localhost:8000")
-        :param api_key: The API key for tenant verification
-        :param default_tenant_id: The default tenant mapping if API key is not strictly mapped
-        """
-        self.base_url = base_url.rstrip('/')
+
+    def __init__(
+        self,
+        base_url: str,
+        api_key: Optional[str] = None,
+        timeout: float = 15.0,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
         self.api_key = api_key
-        self.default_tenant_id = default_tenant_id
+        self.timeout = timeout
+
+    # ── Internal helpers ───────────────────────────────────────────────────
+
+    def _headers(self, extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+        h: Dict[str, str] = {"Content-Type": "application/json", "Accept": "application/json"}
+        if self.api_key:
+            h["X-Hermes-API-Key"] = self.api_key
+        if extra:
+            h.update(extra)
+        return h
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        payload: Any = None,
+        params: Optional[Dict[str, str]] = None,
+        extra_headers: Optional[Dict[str, str]] = None,
+    ) -> Any:
+        url = f"{self.base_url}{path}"
+        if params:
+            url = f"{url}?{urllib.parse.urlencode(params)}"
+        data = json.dumps(payload).encode() if payload is not None else None
+        req = urllib.request.Request(url, data=data, headers=self._headers(extra_headers), method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                body = resp.read().decode()
+                return json.loads(body) if body else {}
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode()
+            try:
+                detail = json.loads(body).get("detail", body)
+            except Exception:
+                detail = body
+            raise HermesError(exc.code, detail) from exc
+        except Exception as exc:
+            raise HermesError(0, str(exc)) from exc
+
+    # ── Ingest ──────────────────────────────────────────────────────────────
 
     def send(
         self,
         destination_url: str,
         payload: Dict[str, Any],
-        headers: Optional[Dict[str, str]] = None,
+        *,
         idempotency_key: Optional[str] = None,
         filter_expression: Optional[str] = None,
-        transform_expression: Optional[str] = None,
+        transform: Optional[Dict[str, Any]] = None,
+        ordering_key: Optional[str] = None,
         signature_provider: Optional[str] = None,
+        extra_headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
+        """Ingest a single webhook event through Hermes.
+
+        Returns a dict with at least ``{"id": "<uuid>", "status": "pending"}``.
         """
-        Ingests a webhook event through Hermes for high-reliability forwarding.
-        
-        :param destination_url: The downstream destination URL for this webhook
-        :param payload: The JSON payload dictionary
-        :param headers: Optional additional headers to forward to the destination
-        :param idempotency_key: Optional key to guarantee exactly-once delivery
-        :param filter_expression: Optional event filter (e.g. "event.type == 'payment.succeeded'")
-        :param transform_expression: Optional JSON mapping structure (as a JSON string or dict)
-        :param signature_provider: Optional signature provider: stripe, github, or hermes
-        :return: Dict containing execution status and webhook ID
-        """
-        url = f"{self.base_url}/api/v1/ingest"
-        
-        # Build query parameters
-        params = []
-        if destination_url:
-            params.append(f"url={urllib.parse.quote(destination_url)}")
+        params: Dict[str, str] = {"url": destination_url}
         if filter_expression:
-            params.append(f"filter={urllib.parse.quote(filter_expression)}")
-        if transform_expression:
-            if isinstance(transform_expression, dict):
-                transform_expression = json.dumps(transform_expression)
-            params.append(f"transform={urllib.parse.quote(transform_expression)}")
+            params["filter"] = filter_expression
+        if transform:
+            params["transform"] = json.dumps(transform)
+        if ordering_key:
+            params["ordering_key"] = ordering_key
         if signature_provider:
-            params.append(f"signature_provider={urllib.parse.quote(signature_provider)}")
-            
-        if params:
-            url = f"{url}?{'&'.join(params)}"
-
-        # Prepare request headers
-        request_headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
-        if self.api_key:
-            request_headers["X-Hermes-API-Key"] = self.api_key
+            params["signature_provider"] = signature_provider
+        headers: Dict[str, str] = {}
         if idempotency_key:
-            request_headers["Idempotency-Key"] = idempotency_key
-            
-        # Add custom headers (to be forwarded)
-        if headers:
-            for k, v in headers.items():
-                request_headers[k] = v
+            headers["Idempotency-Key"] = idempotency_key
+        if extra_headers:
+            headers.update(extra_headers)
+        return self._request("POST", "/api/v1/ingest", payload=payload, params=params, extra_headers=headers)
 
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers=request_headers, method="POST")
+    def fan_out(
+        self,
+        destination_urls: List[str],
+        payload: Dict[str, Any],
+        **kwargs: Any,
+    ) -> List[Dict[str, Any]]:
+        """Send the same payload to multiple destinations (fan-out).
 
-        try:
-            with urllib.request.urlopen(req, timeout=10) as response:
-                body = response.read().decode("utf-8")
-                return json.loads(body)
-        except urllib.error.HTTPError as e:
-            err_body = e.read().decode("utf-8")
-            try:
-                err_json = json.loads(err_body)
-                detail = err_json.get("detail", err_body)
-            except Exception:
-                detail = err_body
-            raise RuntimeError(f"Hermes Ingestion Failed (HTTP {e.code}): {detail}")
-        except Exception as e:
-            raise RuntimeError(f"Hermes Client Error: {e}")
+        Each destination gets an independent webhook record. Returns a list of
+        ingest responses, one per destination.
+        """
+        return [self.send(url, payload, **kwargs) for url in destination_urls]
+
+    # ── Webhooks ────────────────────────────────────────────────────────────
 
     def get_webhook(self, webhook_id: str) -> Dict[str, Any]:
-        """
-        Retrieves detailed execution status and delivery attempts logs for a webhook.
-        
-        :param webhook_id: UUID of the webhook
-        """
-        url = f"{self.base_url}/api/v1/webhooks/{webhook_id}"
-        req = urllib.request.Request(url, method="GET")
-        if self.api_key:
-            req.add_header("X-Hermes-API-Key", self.api_key)
-            
-        try:
-            with urllib.request.urlopen(req, timeout=10) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            raise RuntimeError(f"Failed to fetch webhook details (HTTP {e.code}): {e.reason}")
+        """Fetch status and delivery attempts for a webhook."""
+        return self._request("GET", f"/api/v1/webhooks/{webhook_id}")
+
+    def list_webhooks(
+        self,
+        status: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """List webhooks with optional status filter."""
+        params: Dict[str, str] = {"limit": str(limit), "offset": str(offset)}
+        if status:
+            params["status"] = status
+        return self._request("GET", "/api/v1/webhooks", params=params)
 
     def replay_webhook(self, webhook_id: str) -> Dict[str, Any]:
-        """
-        Manually forces replay of a webhook immediately.
-        
-        :param webhook_id: UUID of the webhook
-        """
-        url = f"{self.base_url}/api/v1/webhooks/{webhook_id}/replay"
-        req = urllib.request.Request(url, method="POST")
-        if self.api_key:
-            req.add_header("X-Hermes-API-Key", self.api_key)
-            
-        try:
-            with urllib.request.urlopen(req, timeout=10) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            raise RuntimeError(f"Failed to replay webhook (HTTP {e.code}): {e.reason}")
+        """Force immediate re-delivery of a failed webhook."""
+        return self._request("POST", f"/api/v1/webhooks/{webhook_id}/replay")
+
+    # ── DLQ ─────────────────────────────────────────────────────────────────
+
+    def list_dlq(self, limit: int = 50, offset: int = 0) -> Dict[str, Any]:
+        """Return webhooks in the Dead Letter Queue."""
+        return self._request("GET", "/api/v1/dlq", params={"limit": str(limit), "offset": str(offset)})
+
+    def replay_all_dlq(self) -> Dict[str, Any]:
+        """Re-queue every webhook currently in the DLQ."""
+        return self._request("POST", "/api/v1/dlq/replay-all")
+
+    def dlq_health(self) -> Dict[str, Any]:
+        """Return the DLQ health score and intelligence summary."""
+        return self._request("GET", "/api/v1/dlq/health")
+
+    # ── Stats & audit ────────────────────────────────────────────────────────
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Return delivery statistics for your tenant."""
+        return self._request("GET", "/api/v1/stats")
+
+    def get_audit_log(
+        self,
+        resource_type: Optional[str] = None,
+        action: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """Return the audit log for your tenant."""
+        params: Dict[str, str] = {"limit": str(limit), "offset": str(offset)}
+        if resource_type:
+            params["resource_type"] = resource_type
+        if action:
+            params["action"] = action
+        return self._request("GET", "/api/v1/audit-log", params=params)
+
+    # ── Destinations ─────────────────────────────────────────────────────────
+
+    def list_destinations(self) -> List[Dict[str, Any]]:
+        return self._request("GET", "/api/v1/destinations")
+
+    def create_destination(self, name: str, url: str, **kwargs: Any) -> Dict[str, Any]:
+        return self._request("POST", "/api/v1/destinations", payload={"name": name, "url": url, **kwargs})
+
+    def delete_destination(self, destination_id: str) -> None:
+        self._request("DELETE", f"/api/v1/destinations/{destination_id}")

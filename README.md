@@ -1,241 +1,352 @@
 # Hermes
 
-Guaranteed webhook delivery middleware for teams that need reliable event intake while their downstream apps deploy, fail, or slow down.
+Self-hosted webhook delivery middleware. Postgres-only. No Redis. No Kafka.
 
-Hermes sits between webhook publishers such as Stripe, Shopify, Twilio, GitHub, or internal services and your application. It accepts webhook requests immediately, stores them durably in PostgreSQL, and delivers them asynchronously with concurrent workers, exponential backoff, delivery logs, and manual replay from a developer console.
+Hermes sits between webhook publishers (Stripe, GitHub, Shopify, your internal services) and your application. It accepts events instantly, stores them durably in PostgreSQL, and delivers them reliably with exponential retry, circuit breaking, fan-out routing, and a full DLQ intelligence layer — the stuff every team builds from scratch and never quite finishes.
 
-## Why It Exists
+---
 
-Webhook providers usually expect your endpoint to be online and fast. If your app is restarting, overloaded, or temporarily broken, events can be lost or require manual recovery. Hermes gives you a lightweight self-hosted buffer without requiring Redis, RabbitMQ, or Kafka for the MVP path.
+## Why Hermes over rolling your own
 
-## Architecture
+Most teams write a Celery task or an SQS consumer and call it a webhook handler. Three months later it has no circuit breaker, no DLQ visibility, no replay, and the retry logic resets on every deploy. Hermes replaces that entirely:
 
-Hermes uses PostgreSQL as both state store and queue. Workers claim jobs atomically with `SELECT ... FOR UPDATE SKIP LOCKED`, allowing multiple workers to process pending webhooks without double-delivery from the queue.
+| Feature | DIY queue | Hermes |
+|---|---|---|
+| Durable storage | depends | PostgreSQL — same DB you already have |
+| Concurrent delivery | sometimes | `SELECT FOR UPDATE SKIP LOCKED` |
+| Circuit breaker per destination | never | ✅ open/half-open/closed |
+| Exponential backoff | usually | ✅ 429/Retry-After aware |
+| Dead letter queue | rarely | ✅ with failure classification |
+| DLQ intelligence | never | ✅ 0-100 health score, incident lifecycle |
+| Fan-out to N destinations | never | ✅ one call, N deliveries |
+| Filter / transform | never | ✅ expression-based, per-destination |
+| Cloud source adapters | never | ✅ SNS, Pub/Sub, Azure Event Grid |
+| Audit log | never | ✅ tamper-evident, queryable |
+| Dashboard | never | ✅ built-in |
+| Multi-tenant | never | ✅ JWT + API key |
 
-```mermaid
-flowchart TD
-    A["Webhook Source<br/>Stripe, GitHub, Shopify"] -->|POST| B["Hermes Ingestion API<br/>FastAPI"]
-    B -->|Persist payload and headers| C["PostgreSQL<br/>Queue and audit log"]
-    C -->|SKIP LOCKED claim| D["Worker Pool"]
-    D -->|POST with tracing headers| E["Downstream App"]
-    E -->|2xx| F["Completed"]
-    E -->|timeout or non-2xx| G["Retry with exponential backoff"]
-    G --> C
-    G -->|max retries exceeded| H["Dead Letter Queue"]
-    H -->|manual replay| C
-```
+## Why Hermes over Hookdeck / Svix (hosted services)
 
-## Features
+- **No per-event pricing.** Flat infra cost. At 10 M events/month the difference is real.
+- **Data never leaves your infrastructure.** Required for healthcare, fintech, EU data residency.
+- **Postgres only.** No new infrastructure to operate.
+- **DLQ Intelligence.** No hosted service has automatic failure classification, incident lifecycle management, or AI-powered root cause analysis.
 
-- Durable ingestion endpoint that returns quickly after writing to PostgreSQL.
-- Concurrent worker pool using Postgres row locking and `SKIP LOCKED`.
-- Exponential retry backoff with configurable retry limits.
-- Dead letter queue for permanently failed webhooks.
-- Manual replay endpoint and dashboard action.
-- Header preservation with Hermes tracing headers.
-- Idempotency support using `Idempotency-Key` or `X-Hermes-Idempotency-Key`.
-- Fan-out routing to multiple destinations from one incoming event.
-- Simple destination filtering with expressions such as `event.type == 'payment.succeeded'`.
-- Lightweight payload transformation with JSON field mapping.
-- Optional Stripe, GitHub, or generic HMAC signature verification.
-- Tenant-aware API keys and usage metrics for billing-style event counts.
-- Structured JSON logs for ingestion, worker claiming, delivery, retry, DLQ, and replay events.
-- Developer console for stats, filtering, inspection, payloads, headers, attempts, and replay.
-- Optional `X-Hermes-API-Key` protection for API endpoints.
-- Destination URL validation with optional host allowlisting and private-network blocking.
-- Prometheus-style `/metrics` endpoint for operational visibility.
+---
 
 ## Quickstart
 
-Prerequisites:
-
-- Docker
-- Docker Compose
-
-Start the stack:
+**Prerequisites:** Docker, Docker Compose
 
 ```bash
+git clone https://github.com/your-org/hermes
+cd hermes
+cp .env.example .env        # review defaults, set JWT_SECRET for production
 docker-compose up --build
 ```
 
-Services:
+Dashboard: [http://localhost:8080](http://localhost:8080)  
+API docs: [http://localhost:8000/api/docs](http://localhost:8000/api/docs)
 
-- PostgreSQL: `localhost:5432`
-- Hermes API and dashboard: `http://localhost:8000`
-- Fake downstream demo app: `http://localhost:9000`
-
-Send a test webhook:
+**Register and send your first webhook:**
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/ingest?url=https://httpbin.org/status/200" \
+# 1. Create an account
+curl -s -X POST http://localhost:8000/auth/register \
   -H "Content-Type: application/json" \
-  -H "Idempotency-Key: payment-succeeded-2999" \
-  -H "X-Custom-Auth-Signature: stripe_xyz123" \
-  -d '{"event":"payment.succeeded","amount":2999}'
+  -d '{"email":"you@example.com","password":"yourpassword"}' | jq .
+
+# 2. Log in (sets a session cookie)
+curl -s -c cookies.txt -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"you@example.com","password":"yourpassword"}' | jq .
+
+# 3. Send a webhook (fan-out to two destinations)
+curl -s -b cookies.txt \
+  -X POST "http://localhost:8000/api/v1/ingest?url=http://localhost:9000/ok&url=http://localhost:9000/slow" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: order-123" \
+  -d '{"event":"order.created","amount":4999}' | jq .
 ```
 
-The API responds immediately with a webhook id while the worker delivers the payload in the background.
-
-Run the full demo:
+**Or use the Python SDK:**
 
 ```bash
-docker-compose exec hermes python scripts/demo.py
+pip install hermes-middleware-sdk        # coming to PyPI — install from ./sdks/python for now
 ```
 
-The demo checks health, queues a successful delivery to the fake downstream service, proves duplicate ingestion reuses the original webhook id, queues a failing delivery, shows retry state, requests replay, and prints current stats.
+```python
+from hermes import HermesClient
+
+client = HermesClient("http://localhost:8000", api_key="hk_...")
+
+# Send a webhook
+result = client.send(
+    destination_url="https://myapp.com/hooks",
+    payload={"event": "order.created", "amount": 4999},
+    idempotency_key="order-123",
+)
+print(result["id"])  # webhook UUID
+
+# Fan-out
+client.fan_out(
+    ["https://primary.example.com/hook", "https://analytics.example.com/hook"],
+    payload={"event": "payment.succeeded"},
+)
+
+# DLQ
+health = client.dlq_health()
+print(f"DLQ health: {health['health_score']}/100")
+```
+
+**Or the CLI:**
+
+```bash
+pip install ./cli            # install from repo
+hermes config set --url http://localhost:8000 --api-key hk_...
+
+hermes ingest --to http://localhost:9000/ok '{"event":"test"}'
+hermes stats
+hermes dlq list
+hermes dlq replay-all --confirm
+hermes listen --port 4040 --forward http://localhost:3000/hook
+```
+
+---
+
+## Architecture
+
+```
+Webhook Source (Stripe, GitHub, SNS, Pub/Sub…)
+        │  POST
+        ▼
+┌─────────────────────────────┐
+│   Hermes Ingestion API      │  FastAPI — returns 200 immediately
+│   /api/v1/ingest            │  Writes to Postgres, runs filter/transform
+└────────────┬────────────────┘
+             │ SELECT FOR UPDATE SKIP LOCKED
+             ▼
+┌─────────────────────────────┐
+│   Worker Pool               │  Concurrent async workers
+│   Circuit Breaker           │  Per-destination open/half-open/closed
+│   Retry Scheduler           │  Exponential backoff, 429-aware
+└────────────┬────────────────┘
+             │ failure
+             ▼
+┌─────────────────────────────┐
+│   Dead Letter Queue         │  Failure classification
+│   DLQ Intelligence Engine   │  Health score, incident lifecycle, AI analysis
+└─────────────────────────────┘
+```
+
+All state lives in **PostgreSQL**. No Redis. No Kafka. No external queue service.
+
+---
+
+## Features
+
+### Delivery reliability
+- **At-least-once delivery** with `SELECT FOR UPDATE SKIP LOCKED` — no double-delivery from the queue
+- **Exponential backoff** — `base × 2^attempt`, respects `Retry-After` headers from destinations
+- **Circuit breaker per destination** — open/half-open/closed state machine, prevents hammering broken endpoints
+- **Idempotency** — `Idempotency-Key` header deduplicates at ingest; unique constraint enforced in Postgres
+- **Ordering keys** — `ordering_key` field guarantees FIFO delivery per key within a destination
+
+### Routing
+- **Fan-out** — one inbound event → N independent deliveries (`?url=...&url=...`)
+- **Registered destinations** — store URL, circuit state, custom headers, retry policy, transform, filter
+- **Filter expressions** — `event.type == 'payment.succeeded'` — filter at ingest, not after delivery
+- **Payload transforms** — JSON field mapping to reshape payloads before delivery
+
+### DLQ Intelligence (unique — no other tool has this)
+- Automatic failure classification into 14 categories (DNS, SSL, timeout, auth, rate-limit, etc.)
+- Incident lifecycle management — open → investigating → resolved, with affected webhook count
+- 0-100 health score based on DLQ size, growth rate, failure diversity, circuit state
+- AI-powered root cause analysis via Claude (`ENABLE_AI_FEATURES=true`)
+
+### Observability
+- Prometheus metrics at `/metrics` — webhook counts, delivery latency, circuit breaker states, DLQ depth
+- OpenTelemetry tracing — opt-in with `OTEL_EXPORTER_OTLP_ENDPOINT`
+- Structured JSON logs with `tenant_id`, `webhook_id`, `event_id` on every line
+- Audit log — every CREATE/UPDATE/DELETE to destinations, projects, and alert configs is recorded
+
+### Cloud integrations
+- **AWS SNS** — `POST /api/v1/sources/aws-sns` with automatic subscription confirmation handshake
+- **GCP Pub/Sub** — push subscription endpoint with base64 data decoding
+- **Azure Event Grid** — both schemas, validation handshake, optional shared secret
+- **Stripe, GitHub, Shopify** — signature verification via `?signature_provider=stripe|github|hermes`
+
+### Operations
+- **Graceful shutdown** — SIGTERM drains in-flight deliveries (35 s window) before exit
+- **Multi-replica safe** — Postgres token-bucket rate limiter works across API replicas
+- **Production nginx** — `nginx.prod.conf` with TLS 1.2/1.3, OCSP stapling, HSTS preload, `/metrics` IP allowlist
+- **Startup validation** — refuses to start in `ENVIRONMENT=production` with default `JWT_SECRET`
+
+---
 
 ## Configuration
 
-Copy `.env.example` to `.env` for local overrides.
+Copy `.env.example` to `.env`. Key variables:
 
-Important settings:
-
-| Variable | Purpose |
-|---|---|
-| `DATABASE_URL` | Async SQLAlchemy database URL used by the app. |
-| `WORKER_CONCURRENCY` | Number of concurrent delivery workers. |
-| `DEFAULT_MAX_RETRIES` | Number of delivery attempts before DLQ. |
-| `BACKOFF_BASE_SECONDS` | Base interval for exponential backoff. |
-| `HERMES_API_KEY` | Optional API key. When set, clients must send `X-Hermes-API-Key`. |
-| `HERMES_API_KEYS` | Optional tenant API keys as `tenant_a:key_a,tenant_b:key_b`. |
-| `ALLOW_PRIVATE_DESTINATIONS` | Allows local/private destinations for demos. Set `false` in production. |
-| `DESTINATION_HOST_ALLOWLIST` | Optional comma-separated list of allowed destination hosts. |
-| `STRIPE_WEBHOOK_SECRET` | Secret used when `signature_provider=stripe`. |
-| `GITHUB_WEBHOOK_SECRET` | Secret used when `signature_provider=github`. |
-| `HERMES_WEBHOOK_SECRET` | Secret used when `signature_provider=hermes`. |
-| `AUTO_CREATE_TABLES` | Creates tables at startup for MVP/demo use. Production should use migrations. |
-
-## Routing Examples
-
-Fan out one event to multiple destinations:
-
-```bash
-curl -X POST "http://localhost:8000/api/v1/ingest?url=http://localhost:9000/ok&urls=http://localhost:9000/ok?copy=analytics" \
-  -H "Content-Type: application/json" \
-  -H "Idempotency-Key: evt_123" \
-  -d '{"event":{"id":"evt_123","type":"payment.succeeded","amount":2999}}'
-```
-
-Filter before queueing:
-
-```bash
-curl -X POST "http://localhost:8000/api/v1/ingest?url=http://localhost:9000/ok&filter=event.type%20%3D%3D%20%27payment.succeeded%27" \
-  -H "Content-Type: application/json" \
-  -d '{"event":{"id":"evt_124","type":"payment.failed"}}'
-```
-
-Transform payload shape:
-
-```bash
-curl -X POST "http://localhost:8000/api/v1/ingest?url=http://localhost:9000/ok&transform=%7B%22id%22%3A%22event.id%22%2C%22type%22%3A%22event.type%22%7D" \
-  -H "Content-Type: application/json" \
-  -d '{"event":{"id":"evt_125","type":"payment.succeeded"}}'
-```
-
-Enable signature verification by setting the provider secret, then pass `signature_provider=stripe`, `signature_provider=github`, or `signature_provider=hermes` on ingest.
-
-## API Reference
-
-| Endpoint | Method | Description |
+| Variable | Default | Description |
 |---|---|---|
-| `/api/v1/ingest?url=<URL>` | `POST` | Captures payload and headers, stores a webhook, and queues delivery. |
-| `/api/v1/webhooks` | `GET` | Lists webhooks with pagination and optional `status` filtering. |
-| `/api/v1/webhooks/{id}` | `GET` | Returns webhook details and delivery attempts. |
-| `/api/v1/webhooks/{id}/replay` | `POST` | Resets a webhook and schedules immediate replay. |
-| `/api/v1/stats` | `GET` | Returns dashboard aggregate counts and success rate. |
-| `/api/v1/usage` | `GET` | Returns tenant event and unique-event usage counts. |
-| `/metrics` | `GET` | Prometheus-style operational metrics. |
-| `/health` | `GET` | Health check. |
+| `ENVIRONMENT` | `development` | Set to `production` to enable all safety checks |
+| `JWT_SECRET` | placeholder | **Must** be changed in production. Generate: `openssl rand -hex 32` |
+| `DATABASE_URL` | local Postgres | Async SQLAlchemy URL |
+| `WORKER_CONCURRENCY` | `10` | Concurrent delivery workers per process |
+| `DEFAULT_MAX_RETRIES` | `5` | Delivery attempts before DLQ |
+| `BACKOFF_BASE_SECONDS` | `30` | Retry backoff base (30 → 60 → 120 → 240 → 480 s) |
+| `MONTHLY_EVENT_QUOTA` | `0` | Per-tenant event quota. 0 = unlimited |
+| `RATE_LIMIT_PER_MINUTE` | `60` | Ingest rate limit per tenant |
+| `ALLOW_PRIVATE_DESTINATIONS` | `false` | **Must** be false in production (SSRF risk) |
+| `FORCE_HTTPS` | `false` | Redirects HTTP → HTTPS and sets HSTS |
+| `COOKIE_SECURE` | `false` | Set to `true` when behind HTTPS |
+| `ANTHROPIC_API_KEY` | — | Enable AI features (`ENABLE_AI_FEATURES=true`) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | OpenTelemetry collector endpoint |
+
+---
+
+## Production deployment
+
+### Docker Compose (single server)
+
+```bash
+cp .env.example .env
+# Edit .env: set JWT_SECRET, POSTGRES_PASSWORD, ENVIRONMENT=production,
+#            COOKIE_SECURE=true, FORCE_HTTPS=true
+docker-compose up -d
+```
+
+For TLS, use `nginx.prod.conf` instead of `nginx.conf`:
+
+```yaml
+# In docker-compose.yml nginx volumes:
+- ./nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
+- /etc/letsencrypt:/etc/letsencrypt:ro
+```
+
+### Horizontal scaling
+
+Scale workers independently from the API:
+
+```bash
+docker-compose up -d --scale hermes-worker=4
+```
+
+All workers share the same Postgres queue via `SKIP LOCKED` — no coordination needed.
+
+### Database migrations
+
+```bash
+docker-compose run --rm hermes-migrate   # runs alembic upgrade head
+```
+
+Never use `AUTO_CREATE_TABLES=true` in production.
+
+---
+
+## SDKs
+
+**Python** (sync + async):
+```bash
+pip install ./sdks/python          # local install
+# pip install hermes-middleware-sdk  # coming to PyPI
+```
+
+```python
+from hermes import HermesClient
+from hermes.async_client import AsyncHermesClient
+
+# Sync
+client = HermesClient("http://localhost:8000", api_key="hk_...")
+client.send("https://myapp.com/hook", {"event": "order.created"})
+
+# Async
+async with AsyncHermesClient("http://localhost:8000", api_key="hk_...") as client:
+    await client.fan_out(["https://a.com/hook", "https://b.com/hook"], {"event": "test"})
+```
+
+**JavaScript / TypeScript** (ESM + CJS, zero dependencies):
+```bash
+npm install ./sdks/js              # local install
+# npm install hermes-middleware-sdk  # coming to npm
+```
+
+```js
+import { Hermes } from 'hermes-middleware-sdk';
+
+const hermes = new Hermes('http://localhost:8000', { apiKey: 'hk_...' });
+await hermes.send('https://myapp.com/hook', { event: 'order.created' });
+await hermes.fanOut(['https://a.com/hook', 'https://b.com/hook'], { event: 'test' });
+const health = await hermes.dlqHealth();
+```
+
+---
+
+## CLI
+
+```bash
+pip install ./cli
+
+hermes config set --url http://localhost:8000 --api-key hk_...
+
+hermes ingest --to https://myapp.com/hook '{"event":"test"}'
+hermes status <webhook-id>
+hermes stats
+hermes dlq list
+hermes dlq replay <webhook-id>
+hermes dlq replay-all --confirm
+hermes dlq health
+hermes audit --resource-type destination --action UPDATE
+hermes listen --port 4040 --forward http://localhost:3000/hook
+```
+
+---
+
+## Benchmarking
+
+Run the load test against a local stack:
+
+```bash
+docker-compose up -d
+pip install httpx
+python benchmark/loadtest.py \
+  --url http://localhost:8000 \
+  --destination http://localhost:9000/ok \
+  --concurrency 20 \
+  --duration 30
+```
+
+Results are saved to `benchmark/last_result.json`.
+
+---
 
 ## Development
 
-Install backend dependencies:
-
 ```bash
 cd backend
-pip install -r requirements-dev.txt
+pip install -r requirements.txt
+python -m pytest                          # 83 unit tests
+python -m pytest tests/test_api_integration.py  # integration (needs running stack)
 ```
 
-Run tests:
-
+Run locally:
 ```bash
-python -m pytest
+uvicorn app.api_main:app --reload --port 8000 &
+python -m app.worker_main &
 ```
 
-Run live API integration tests against a running Hermes instance:
+API docs available at [http://localhost:8000/api/docs](http://localhost:8000/api/docs).
 
-```bash
-set HERMES_TEST_BASE_URL=http://localhost:8000
-python -m pytest tests/test_api_integration.py
-```
-
-On macOS/Linux:
-
-```bash
-HERMES_TEST_BASE_URL=http://localhost:8000 python -m pytest tests/test_api_integration.py
-```
-
-When run inside Docker Compose, the integration tests use `http://downstream:9000/ok` and `http://downstream:9000/fail` by default, so they do not depend on external services.
-
-Run migrations for production-style schema management:
-
-```bash
-alembic upgrade head
-```
-
-Run the API locally:
-
-```bash
-uvicorn app.main:app --reload
-```
-
-## Resume-Ready Highlights
-
-- Designed a reliable webhook delivery proxy with durable PostgreSQL queueing.
-- Implemented concurrent workers using `SELECT ... FOR UPDATE SKIP LOCKED`.
-- Added retry scheduling, dead letter handling, replay, and delivery audit logs.
-- Built a full developer console with live polling and detailed delivery inspection.
-- Added production-minded controls including API key enforcement, destination validation, idempotency, structured logs, metrics, config templates, tests, and CI.
+---
 
 ## Integrations
 
-Hermes works seamlessly with popular webhook providers. See detailed integration guides:
+- [Stripe Integration Guide](docs/STRIPE_INTEGRATION.md)
+- [GitHub Integration Guide](docs/GITHUB_INTEGRATION.md)
 
-- [Stripe Integration](docs/STRIPE_INTEGRATION.md) — Forward Stripe payment events with signature verification
-- [GitHub Integration](docs/GITHUB_INTEGRATION.md) — Handle repository webhooks with HMAC verification
+---
 
-### Quick Integration Examples
+## License
 
-**Stripe Webhook:**
-```bash
-curl -X POST https://hermes.example.com/api/v1/ingest \
-  -H "X-Hermes-API-Key: your-api-key" \
-  -d '{
-    "url": "https://your-app.com/stripe-webhook",
-    "signature_provider": "stripe"
-  }'
-```
-
-**GitHub Webhook:**
-```bash
-curl -X POST https://hermes.example.com/api/v1/ingest \
-  -H "X-Hermes-API-Key: your-api-key" \
-  -d '{
-    "url": "https://your-app.com/github-webhook",
-    "signature_provider": "github"
-  }'
-```
-
-**Fan-out to Multiple Destinations:**
-```bash
-curl -X POST https://hermes.example.com/api/v1/ingest \
-  -H "X-Hermes-API-Key: your-api-key" \
-  -d '{
-    "url": "https://primary.example.com/webhook",
-    "urls": ["https://analytics.example.com/webhook", "https://slack.example.com/webhook"]
-  }'
-```
-
-## Interview Pitch
-
-Hermes is a self-hosted webhook reliability layer. It accepts webhook events quickly, verifies optional provider signatures, persists them in PostgreSQL, fans out events to multiple destinations, filters and reshapes payloads, safely distributes delivery work across concurrent async workers using `SKIP LOCKED`, retries failed deliveries with exponential backoff, preserves dead-lettered events for inspection, and exposes replay, usage metrics, structured logs, and a dashboard for operations.
+MIT

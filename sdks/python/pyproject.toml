@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "hermes-middleware-sdk"
+version = "1.0.0"
+description = "Official Python SDK for the Hermes Webhook Delivery Middleware"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+keywords = ["webhook", "delivery", "middleware", "retry", "hermes"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+# Zero mandatory deps — httpx is optional for the async client
+dependencies = []
+
+[project.optional-dependencies]
+async = ["httpx>=0.25"]
+dev = ["pytest>=7", "pytest-asyncio>=0.23", "httpx>=0.25", "respx>=0.20"]
+
+[project.urls]
+Homepage = "https://github.com/your-org/hermes"
+Documentation = "https://github.com/your-org/hermes#readme"
+"Bug Tracker" = "https://github.com/your-org/hermes/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["hermes*"]
