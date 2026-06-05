@@ -1,0 +1,273 @@
+{
+  "title": "Relora Overview",
+  "uid": "relora-overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-3h", "to": "now" },
+  "timezone": "browser",
+  "tags": ["relora", "production"],
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "System",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "id": 2,
+      "type": "gauge",
+      "title": "CPU Usage",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 1 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "showThresholdLabels": false, "showThresholdMarkers": true },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 70 }, { "color": "red", "value": 90 }] }
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "100 - (avg by(instance)(rate(node_cpu_seconds_total{mode=\"idle\"}[2m])) * 100)",
+          "legendFormat": "CPU %"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "gauge",
+      "title": "Memory Usage",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 1 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "showThresholdLabels": false, "showThresholdMarkers": true },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 75 }, { "color": "red", "value": 90 }] }
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))",
+          "legendFormat": "RAM %"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "gauge",
+      "title": "Disk Usage",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 1 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "showThresholdLabels": false, "showThresholdMarkers": true },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 75 }, { "color": "red", "value": 90 }] }
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "100 * (1 - (node_filesystem_avail_bytes{mountpoint=\"/\",fstype!=\"tmpfs\"} / node_filesystem_size_bytes{mountpoint=\"/\",fstype!=\"tmpfs\"}))",
+          "legendFormat": "Disk %"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Network I/O",
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 1 },
+      "fieldConfig": {
+        "defaults": { "unit": "Bps" },
+        "overrides": [{ "matcher": { "id": "byName", "options": "RX" }, "properties": [{ "id": "custom.transform", "value": "negative-Y" }] }]
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(node_network_receive_bytes_total{device!~\"lo\"}[2m])",
+          "legendFormat": "RX"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(node_network_transmit_bytes_total{device!~\"lo\"}[2m])",
+          "legendFormat": "TX"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "PostgreSQL",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 },
+      "collapsed": false
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Active DB Connections",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 8 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 40 }, { "color": "red", "value": 80 }] }
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "pg_stat_activity_count{datname=\"relora\",state=\"active\"}",
+          "legendFormat": "Active"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Transaction Rate",
+      "gridPos": { "h": 4, "w": 10, "x": 4, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(pg_stat_database_xact_commit{datname=\"relora\"}[2m])",
+          "legendFormat": "Commits/s"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(pg_stat_database_xact_rollback{datname=\"relora\"}[2m])",
+          "legendFormat": "Rollbacks/s"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "DB Rows Read vs Written",
+      "gridPos": { "h": 4, "w": 10, "x": 14, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "rows/s" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(pg_stat_database_tup_fetched{datname=\"relora\"}[2m])",
+          "legendFormat": "Fetched"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(pg_stat_database_tup_inserted{datname=\"relora\"}[2m]) + rate(pg_stat_database_tup_updated{datname=\"relora\"}[2m]) + rate(pg_stat_database_tup_deleted{datname=\"relora\"}[2m])",
+          "legendFormat": "Written"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Cache Hit Ratio",
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 12 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "pg_stat_database_blks_hit{datname=\"relora\"} / (pg_stat_database_blks_hit{datname=\"relora\"} + pg_stat_database_blks_read{datname=\"relora\"})",
+          "legendFormat": "Cache hit %"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Deadlocks & Conflicts",
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 12 },
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(pg_stat_database_deadlocks{datname=\"relora\"}[5m])",
+          "legendFormat": "Deadlocks/s"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(pg_stat_database_conflicts{datname=\"relora\"}[5m])",
+          "legendFormat": "Conflicts/s"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "DB Size",
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 12 },
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "pg_database_size_bytes{datname=\"relora\"}",
+          "legendFormat": "relora DB"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "row",
+      "title": "API Health",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
+      "collapsed": false
+    },
+    {
+      "id": 21,
+      "type": "stat",
+      "title": "API Up",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 17 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [{ "type": "value", "options": { "1": { "text": "UP", "color": "green" }, "0": { "text": "DOWN", "color": "red" } } }],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "up{job=\"relora-api\"}",
+          "legendFormat": "API"
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Process CPU (API + Worker)",
+      "gridPos": { "h": 4, "w": 10, "x": 4, "y": 17 },
+      "fieldConfig": { "defaults": { "unit": "percent" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(process_cpu_seconds_total{job=\"relora-api\"}[2m]) * 100",
+          "legendFormat": "API CPU %"
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Process Memory (API)",
+      "gridPos": { "h": 4, "w": 10, "x": 14, "y": 17 },
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "process_resident_memory_bytes{job=\"relora-api\"}",
+          "legendFormat": "RSS"
+        }
+      ]
+    }
+  ]
+}

@@ -342,6 +342,8 @@ async def get_dashboard(
     pi_row = provider_issue_result.fetchone()
     provider_issue_likely = pi_row is not None and (pi_row.dest_count or 0) >= 2
 
+    has_open_circuit = cb_summary["open"] > 0
+
     source_health = "healthy"
     destination_health = "healthy"
     if provider_issue_likely:
@@ -382,7 +384,6 @@ async def get_dashboard(
     unacked_schema_changes = sc_count_result.scalar() or 0
 
     # ── Overall system status ──
-    has_open_circuit = cb_summary["open"] > 0
     has_critical_incident = any(i["severity"] == "critical" for i in active_incidents)
     if failed_24h > 50 or has_critical_incident or slo_breaches:
         system_status = "critical"

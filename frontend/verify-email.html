@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Relora — Verify Email</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="auth-page">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <div style="font-size:32px;margin-bottom:8px">⚡</div>
+      <div class="auth-logo-text">Relora</div>
+      <div class="auth-logo-sub">Webhook Delivery Middleware</div>
+    </div>
+
+    <!-- Loading -->
+    <div id="state-loading">
+      <div class="auth-form-title">Verifying your email…</div>
+      <div class="auth-form-sub" style="text-align:center">Please wait.</div>
+    </div>
+
+    <!-- Success -->
+    <div id="state-success" style="display:none;text-align:center">
+      <div style="font-size:40px;margin-bottom:16px">✓</div>
+      <div class="auth-form-title">Email verified</div>
+      <div class="auth-form-sub" style="margin-bottom:24px">Your account is active. Redirecting to sign in…</div>
+      <a href="/login.html" class="btn btn-primary" style="display:inline-block;padding:10px 24px;text-decoration:none">
+        Sign in now
+      </a>
+    </div>
+
+    <!-- Error -->
+    <div id="state-error" style="display:none;text-align:center">
+      <div style="font-size:40px;margin-bottom:16px">✗</div>
+      <div class="auth-form-title" style="color:var(--danger)">Verification failed</div>
+      <div id="error-msg" class="auth-form-sub" style="margin-bottom:24px">
+        This link is invalid or has expired.
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <form id="resend-form" onsubmit="handleResend(event)">
+          <div class="input-group" style="margin-bottom:10px">
+            <label class="input-label">Email address</label>
+            <input class="input" type="email" id="resend-email"
+                   placeholder="you@company.com" required autofocus>
+          </div>
+          <div id="resend-msg" style="font-size:13px;margin-bottom:10px;display:none"></div>
+          <button type="submit" class="btn btn-primary"
+                  style="width:100%;padding:10px" id="resend-btn">
+            Send a new verification link
+          </button>
+        </form>
+        <a href="/login.html" style="font-size:13px;color:var(--text3);text-decoration:none;
+                                     text-align:center;margin-top:4px">
+          Back to sign in
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+function show(id) {
+  ['state-loading', 'state-success', 'state-error'].forEach(s => {
+    document.getElementById(s).style.display = s === id ? '' : 'none';
+  });
+}
+
+async function handleResend(e) {
+  e.preventDefault();
+  const btn = document.getElementById('resend-btn');
+  const msg = document.getElementById('resend-msg');
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  msg.style.display = 'none';
+
+  try {
+    const res = await fetch('/api/v1/auth/request-verification', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: document.getElementById('resend-email').value }),
+    });
+    const j = await res.json().catch(() => ({}));
+    msg.style.color = res.ok ? 'var(--success)' : 'var(--danger)';
+    msg.textContent = j.message || (res.ok ? 'Email sent — check your inbox.' : 'Failed to send. Try again.');
+    msg.style.display = 'block';
+  } catch {
+    msg.style.color = 'var(--danger)';
+    msg.textContent = 'Network error. Is the server running?';
+    msg.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Send a new verification link';
+  }
+}
+
+(async () => {
+  const token = new URLSearchParams(window.location.search).get('token');
+  if (!token) {
+    document.getElementById('error-msg').textContent =
+      'No verification token found in this link. Request a new one below.';
+    show('state-error');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/v1/auth/verify-email?token=' + encodeURIComponent(token));
+    if (res.ok) {
+      show('state-success');
+      setTimeout(() => { window.location.href = '/login.html'; }, 3000);
+    } else {
+      const j = await res.json().catch(() => ({}));
+      document.getElementById('error-msg').textContent =
+        j.detail || 'This link is invalid or has expired. Request a new one below.';
+      show('state-error');
+    }
+  } catch {
+    document.getElementById('error-msg').textContent =
+      'Could not reach the server. Try again shortly.';
+    show('state-error');
+  }
+})();
+</script>
+</body>
+</html>

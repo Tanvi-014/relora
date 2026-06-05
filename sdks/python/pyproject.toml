@@ -31,9 +31,9 @@ async = ["httpx>=0.25"]
 dev = ["pytest>=7", "pytest-asyncio>=0.23", "httpx>=0.25", "respx>=0.20"]
 
 [project.urls]
-Homepage = "https://github.com/your-org/relora"
-Documentation = "https://github.com/your-org/relora#readme"
-"Bug Tracker" = "https://github.com/your-org/relora/issues"
+Homepage = "https://github.com/Tanvi-014/sentinel-"
+Documentation = "https://github.com/Tanvi-014/sentinel-#readme"
+"Bug Tracker" = "https://github.com/Tanvi-014/sentinel-/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]

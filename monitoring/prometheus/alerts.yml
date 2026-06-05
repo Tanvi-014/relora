@@ -1,0 +1,110 @@
+groups:
+  - name: relora
+    rules:
+
+      # ── DLQ depth ────────────────────────────────────────────────────────────
+      - alert: ReloraDLQDepthHigh
+        expr: relora_webhooks_by_status{status="failed"} > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Relora DLQ depth is high"
+          description: >
+            {{ $value | humanize }} webhooks in failed/DLQ state for more than 5 minutes.
+            Investigate failure categories via GET /api/v1/dlq.
+
+      - alert: ReloraDLQDepthCritical
+        expr: relora_webhooks_by_status{status="failed"} > 1000
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Relora DLQ depth is critical"
+          description: >
+            {{ $value | humanize }} webhooks stuck in failed state. Immediate investigation required.
+
+      # ── Delivery error rate ───────────────────────────────────────────────────
+      - alert: ReloraErrorRateHigh
+        expr: relora_delivery_success_rate < 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Relora delivery success rate below 90%"
+          description: >
+            Current success rate is {{ $value }}%. More than 10% of deliveries are failing.
+            Check /api/v1/dashboard for active incidents and destination health.
+
+      - alert: ReloraErrorRateCritical
+        expr: relora_delivery_success_rate < 75
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Relora delivery success rate critically low (<75%)"
+          description: >
+            Current success rate is {{ $value }}%. Over 25% of deliveries are failing.
+            Immediate action required.
+
+      # ── Circuit breaker ───────────────────────────────────────────────────────
+      - alert: ReloraCircuitBreakerOpen
+        expr: relora_circuit_breaker_destinations{state="open"} > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} Relora destination(s) have open circuit breakers"
+          description: >
+            {{ $value }} destination(s) are in OPEN circuit breaker state.
+            Deliveries to these destinations are suspended. Check GET /api/v1/destinations
+            for affected destinations and their circuit_opened_at timestamps.
+
+      # ── Worker stalled ────────────────────────────────────────────────────────
+      # Jobs stuck in "processing" for > 5 min indicate the worker died mid-job.
+      - alert: ReloraWorkerStalled
+        expr: relora_webhooks_by_status{status="processing"} > 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Relora worker appears stalled — webhooks stuck in processing"
+          description: >
+            {{ $value }} webhooks have been in processing state for over 10 minutes.
+            The delivery worker may have crashed. Check: docker logs relora-worker.
+            On restart, the API will automatically recover stuck jobs.
+
+      # ── Pending queue depth ───────────────────────────────────────────────────
+      # A growing pending queue means the worker can't keep up with ingest rate.
+      - alert: ReloraPendingQueueGrowing
+        expr: relora_webhooks_by_status{status="pending"} > 500
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Relora pending queue is growing"
+          description: >
+            {{ $value }} webhooks pending for over 10 minutes.
+            The worker may be under-provisioned. Consider increasing WORKER_CONCURRENCY.
+
+      # ── DLQ health score ──────────────────────────────────────────────────────
+      - alert: ReloraDLQHealthScoreLow
+        expr: relora_dlq_health_score < 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Relora DLQ health score below 50"
+          description: >
+            DLQ health score is {{ $value }}/100. A score below 50 indicates serious
+            recurring failure patterns. Review incidents at GET /api/v1/dlq/incidents.
+
+      - alert: ReloraDLQHealthScoreCritical
+        expr: relora_dlq_health_score < 25
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Relora DLQ health score critically low (<25)"
+          description: >
+            DLQ health score is {{ $value }}/100. Systemic delivery failure in progress.

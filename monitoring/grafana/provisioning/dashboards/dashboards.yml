@@ -1,0 +1,13 @@
+apiVersion: 1
+
+providers:
+  - name: relora
+    orgId: 1
+    folder: Relora
+    folderUid: relora
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 60
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards

@@ -15,3 +15,5 @@ jsonschema>=4.20.0
 # OpenTelemetry — optional; set OTEL_EXPORTER_OTLP_ENDPOINT to activate
 opentelemetry-sdk>=1.24.0
 opentelemetry-exporter-otlp-proto-grpc>=1.24.0
+# Error tracking — optional; set SENTRY_DSN to activate
+sentry-sdk[fastapi]>=2.0.0

@@ -76,6 +76,21 @@ class Settings(BaseSettings):
     RESEND_API_KEY: str = ""
     RESEND_FROM_EMAIL: str = "alerts@relora.example.com"
 
+    # Email verification
+    APP_BASE_URL: str = "http://localhost:8000"          # public-facing base URL for links
+    EMAIL_VERIFICATION_REQUIRED: bool = False             # soft gate — warn but don't block
+    EMAIL_VERIFICATION_EXPIRY_HOURS: int = 24
+
+    # SMS alerts via Twilio
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_FROM_NUMBER: str = ""                         # E.164 format: +15005550006
+
+    # Error tracking
+    SENTRY_DSN: str = ""
+    SENTRY_ENVIRONMENT: str = ""          # overrides ENVIRONMENT label sent to Sentry
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.1
+
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "production"

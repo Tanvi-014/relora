@@ -322,6 +322,7 @@ class User(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email = Column(String, unique=True, nullable=False)
     password_hash = Column(String, nullable=False)
+    email_verified = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
 
     memberships = relationship("ProjectMember", back_populates="user", cascade="all, delete-orphan")
@@ -330,8 +331,41 @@ class User(Base):
         return {
             "id": str(self.id),
             "email": self.email,
+            "email_verified": self.email_verified,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class EmailVerificationToken(Base):
+    __tablename__ = "email_verification_tokens"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    token = Column(String(64), nullable=False, unique=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+
+    __table_args__ = (
+        Index("ix_email_verification_tokens_token", "token"),
+        Index("ix_email_verification_tokens_user_id", "user_id"),
+    )
+
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    token = Column(String(64), nullable=False, unique=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+
+    __table_args__ = (
+        Index("ix_password_reset_tokens_token", "token"),
+        Index("ix_password_reset_tokens_user_id", "user_id"),
+    )
 
 
 class Project(Base):

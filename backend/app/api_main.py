@@ -27,6 +27,24 @@ from app.routers import slo, schema_drift, events as events_router
 configure_logging()
 logger = logging.getLogger("relora.api")
 
+# ── Sentry (optional — activate by setting SENTRY_DSN) ───────────────────────
+if settings.SENTRY_DSN:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+
+        sentry_sdk.init(
+            dsn=settings.SENTRY_DSN,
+            environment=settings.SENTRY_ENVIRONMENT or settings.ENVIRONMENT,
+            traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
+            integrations=[FastApiIntegration(), SqlalchemyIntegration()],
+            send_default_pii=False,
+        )
+        logger.info("Sentry initialised", extra={"event": "sentry.init"})
+    except ImportError:
+        logger.warning("sentry-sdk not installed — SENTRY_DSN is set but Sentry is disabled")
+
 _INSECURE_JWT_DEFAULT = "change-this-secret-in-production-use-openssl-rand-hex-32"
 
 
@@ -46,6 +64,14 @@ def _validate_production_config() -> None:
             errors.append("AUTO_CREATE_TABLES must be false in production.")
         if "*" in settings.CORS_ORIGINS:
             errors.append("CORS_ORIGINS must not contain '*' in production. Use explicit origin URLs.")
+        if settings.RESEND_API_KEY and settings.RESEND_FROM_EMAIL.endswith("@relora.example.com"):
+            errors.append("RESEND_FROM_EMAIL is still the placeholder. Set it to a verified Resend sender address.")
+        if settings.EMAIL_VERIFICATION_REQUIRED and not settings.RESEND_API_KEY:
+            errors.append(
+                "EMAIL_VERIFICATION_REQUIRED=true but RESEND_API_KEY is not set. "
+                "Users would be blocked from login with no way to verify. "
+                "Set RESEND_API_KEY or set EMAIL_VERIFICATION_REQUIRED=false."
+            )
     if errors:
         for e in errors:
             logger.critical("PRODUCTION CONFIG ERROR: %s", e)

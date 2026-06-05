@@ -25,6 +25,12 @@ async function handleLogin(e) {
 
     if (res.ok) {
       window.location.href = '/';
+    } else if (res.status === 403) {
+      // Email not verified — show inline resend option
+      err.innerHTML =
+        'Email not verified. Check your inbox, or ' +
+        '<a href="/verify-email.html" style="color:var(--accent)">request a new link</a>.';
+      err.style.display = 'block';
     } else {
       let msg = 'Invalid credentials';
       try {
@@ -66,8 +72,8 @@ async function handleRegister(e) {
     });
 
     if (res.status === 201) {
-      // Auto-login after register
-      await fetch(API + '/auth/login', {
+      // Attempt auto-login; if server requires email verification first, show the prompt.
+      const loginRes = await fetch(API + '/auth/login', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -76,7 +82,18 @@ async function handleRegister(e) {
           password: document.getElementById('password').value,
         }),
       });
-      window.location.href = '/';
+      if (loginRes.ok) {
+        window.location.href = '/';
+      } else if (loginRes.status === 403) {
+        err.style.color = 'var(--success)';
+        err.textContent = 'Account created! Check your inbox to verify your email before signing in.';
+        err.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Create account';
+      } else {
+        window.location.href = '/login.html';
+      }
+      return;
     } else {
       let msg = 'Registration failed';
       try {

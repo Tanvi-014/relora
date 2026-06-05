@@ -93,10 +93,11 @@ services:
     command: python -m app.worker_main
     stop_grace_period: 40s
     healthcheck:
-      test: ["CMD", "python", "-c", "s=open('/proc/1/stat').read().split(); assert s[2]!='Z','worker zombie'"]
+      test: ["CMD-SHELL", "python -c \"s=open('/proc/1/stat').read().split(); state=s[2]; exit(1 if state in ('Z','D','X') else 0)\""]
       interval: 30s
       timeout: 5s
       retries: 3
+      start_period: 15s
     environment:
       DATABASE_URL: postgresql+asyncpg://relora:${POSTGRES_PASSWORD:-hermesdev}@postgres:5432/relora
       ENVIRONMENT: ${ENVIRONMENT:-development}
