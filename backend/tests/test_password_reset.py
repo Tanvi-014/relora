@@ -19,25 +19,26 @@ from app.models import PasswordResetToken, User
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _make_user(email: str = "test@example.com") -> User:
-    u = User.__new__(User)
-    u.id = uuid4()
-    u.email = email
-    u.password_hash = "hashed"
-    u.email_verified = True
-    return u
+    return User(
+        id=uuid4(),
+        email=email,
+        password_hash="hashed",
+        email_verified=True,
+    )
 
 
 def _make_reset_token(user_id, raw: str, *, expired=False, used=False) -> PasswordResetToken:
-    t = PasswordResetToken.__new__(PasswordResetToken)
-    t.id = uuid4()
-    t.user_id = user_id
-    t.token = raw
-    if expired:
-        t.expires_at = datetime.now(timezone.utc) - timedelta(hours=2)
-    else:
-        t.expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
-    t.used_at = datetime.now(timezone.utc) if used else None
-    return t
+    return PasswordResetToken(
+        id=uuid4(),
+        user_id=user_id,
+        token=raw,
+        expires_at=(
+            datetime.now(timezone.utc) - timedelta(hours=2)
+            if expired
+            else datetime.now(timezone.utc) + timedelta(hours=1)
+        ),
+        used_at=datetime.now(timezone.utc) if used else None,
+    )
 
 
 def _scalar_result(value):

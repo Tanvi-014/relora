@@ -20,25 +20,26 @@ from app.models import EmailVerificationToken, User
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _make_user(email_verified: bool = False) -> User:
-    u = User.__new__(User)
-    u.id = uuid4()
-    u.email = "test@example.com"
-    u.password_hash = "hashed"
-    u.email_verified = email_verified
-    return u
+    return User(
+        id=uuid4(),
+        email="test@example.com",
+        password_hash="hashed",
+        email_verified=email_verified,
+    )
 
 
 def _make_token(user_id, raw: str, *, expired=False, used=False) -> EmailVerificationToken:
-    t = EmailVerificationToken.__new__(EmailVerificationToken)
-    t.id = uuid4()
-    t.user_id = user_id
-    t.token = raw
-    if expired:
-        t.expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
-    else:
-        t.expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
-    t.used_at = datetime.now(timezone.utc) if used else None
-    return t
+    return EmailVerificationToken(
+        id=uuid4(),
+        user_id=user_id,
+        token=raw,
+        expires_at=(
+            datetime.now(timezone.utc) - timedelta(hours=1)
+            if expired
+            else datetime.now(timezone.utc) + timedelta(hours=24)
+        ),
+        used_at=datetime.now(timezone.utc) if used else None,
+    )
 
 
 def _scalar_result(value):
