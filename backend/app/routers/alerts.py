@@ -34,6 +34,8 @@ async def create_alert(
         channel_type=config_in.channel_type,
         config=config_in.config,
         enabled=config_in.enabled if config_in.enabled is not None else True,
+        dlq_threshold=config_in.dlq_threshold,
+        error_rate_threshold=config_in.error_rate_threshold,
     )
     db.add(config)
     await db.flush()
@@ -82,6 +84,10 @@ async def update_alert(
         config.config = new_cfg
     if config_in.enabled is not None:
         config.enabled = config_in.enabled
+    if config_in.dlq_threshold is not None:
+        config.dlq_threshold = config_in.dlq_threshold
+    if config_in.error_rate_threshold is not None:
+        config.error_rate_threshold = config_in.error_rate_threshold
     config.updated_at = func.now()
     await audit(db, request, tenant_id, "UPDATE", "alert_config", str(alert_id), before=before, after=config.to_dict())
     await db.commit()

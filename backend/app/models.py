@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean, Column, DateTime, Float, ForeignKey,
-    Index, Integer, String, Text, UniqueConstraint,
+    Index, Integer, Numeric, String, Text, UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import declarative_base, relationship
@@ -286,6 +286,8 @@ class AlertConfig(Base):
     channel_type = Column(String, nullable=False)  # slack | email
     config = Column(JSONB, nullable=False)
     enabled = Column(Boolean, nullable=False, default=True)
+    dlq_threshold = Column(Integer, nullable=True)        # fire when DLQ depth >= this
+    error_rate_threshold = Column(Numeric(5, 2), nullable=True)  # fire when success rate < this %
     created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
 
@@ -303,6 +305,8 @@ class AlertConfig(Base):
             "channel_type": self.channel_type,
             "config": safe_config,
             "enabled": self.enabled,
+            "dlq_threshold": self.dlq_threshold,
+            "error_rate_threshold": float(self.error_rate_threshold) if self.error_rate_threshold is not None else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -374,6 +378,7 @@ class Project(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String, nullable=False)
     api_key = Column(String, unique=True, nullable=False, default=lambda: f"hk_live_{uuid.uuid4().hex}")
+    source_secrets = Column(JSONB, nullable=False, server_default="{}")
     created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
 
     members = relationship("ProjectMember", back_populates="project", cascade="all, delete-orphan")
@@ -650,6 +655,44 @@ class SchemaChange(Base):
 # ---------------------------------------------------------------------------
 # Destination reliability snapshots
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Weekly Insight Reports
+# ---------------------------------------------------------------------------
+
+class WeeklyInsightReport(Base):
+    __tablename__ = "weekly_insight_reports"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(String, nullable=False, index=True)   # project api_key
+    week_start = Column(DateTime(timezone=True), nullable=False)
+    week_end = Column(DateTime(timezone=True), nullable=False)
+    grade = Column(String(4), nullable=False)
+    reliability_score = Column(Float, nullable=False)
+    score_delta = Column(Float, nullable=True)               # vs previous week
+    report_data = Column(JSONB, nullable=False, default=dict)
+    ai_summary = Column(Text, nullable=True)
+    generated_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+
+    def to_dict(self):
+        return {
+            "id": str(self.id),
+            "tenant_id": self.tenant_id,
+            "week_start": self.week_start.isoformat() if self.week_start else None,
+            "week_end": self.week_end.isoformat() if self.week_end else None,
+            "grade": self.grade,
+            "reliability_score": self.reliability_score,
+            "score_delta": self.score_delta,
+            "report_data": self.report_data,
+            "ai_summary": self.ai_summary,
+            "generated_at": self.generated_at.isoformat() if self.generated_at else None,
+        }
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "week_start", name="uq_weekly_report_tenant_week"),
+        Index("ix_weekly_insight_reports_tenant_id", "tenant_id"),
+    )
+
 
 class DestinationReliabilitySnapshot(Base):
     __tablename__ = "destination_reliability_snapshots"

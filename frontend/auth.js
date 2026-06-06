@@ -24,7 +24,7 @@ async function handleLogin(e) {
     });
 
     if (res.ok) {
-      window.location.href = '/';
+      window.location.href = '/app.html';
     } else if (res.status === 403) {
       // Email not verified — show inline resend option
       err.innerHTML =
@@ -83,9 +83,9 @@ async function handleRegister(e) {
         }),
       });
       if (loginRes.ok) {
-        window.location.href = '/';
+        window.location.href = '/app.html?welcome=1';
       } else if (loginRes.status === 403) {
-        err.style.color = 'var(--success)';
+        err.className = 'err green';
         err.textContent = 'Account created! Check your inbox to verify your email before signing in.';
         err.style.display = 'block';
         btn.disabled = false;

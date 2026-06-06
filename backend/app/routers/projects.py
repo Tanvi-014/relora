@@ -10,6 +10,8 @@ from app.auth import get_current_user, require_project_role
 from app.db import get_db
 from app.models import Project, ProjectMember, User
 
+_VALID_PROVIDERS = {"stripe", "github", "relora", "generic"}
+
 router = APIRouter()
 
 
@@ -179,6 +181,33 @@ async def rotate_api_key(
     return {"api_key": new_key, "message": "API key rotated. Update all services using the old key immediately."}
 
 
+@router.patch("/api/v1/projects/{project_id}/members/{user_id}")
+async def update_member_role(
+    project_id: UUID,
+    user_id: UUID,
+    role: str = Body(..., embed=True),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if role not in ("viewer", "admin", "owner"):
+        raise HTTPException(400, "Role must be viewer, admin, or owner")
+    checker = require_project_role(["owner"])
+    await checker(project_id=str(project_id), current_user=current_user, db=db)
+    result = await db.execute(
+        select(ProjectMember).where(
+            ProjectMember.project_id == project_id,
+            ProjectMember.user_id == user_id,
+        )
+    )
+    m = result.scalar_one_or_none()
+    if not m:
+        raise HTTPException(404, "Member not found")
+    m.role = role
+    await db.commit()
+    await db.refresh(m)
+    return m.to_dict()
+
+
 @router.delete("/api/v1/projects/{project_id}/members/{user_id}", status_code=204)
 async def remove_member(
     project_id: UUID,
@@ -198,5 +227,71 @@ async def remove_member(
     if not m:
         raise HTTPException(404, "Member not found")
     await db.delete(m)
+    await db.commit()
+    return Response(status_code=204)
+
+
+@router.get("/api/v1/projects/{project_id}/source-secrets")
+async def list_source_secrets(
+    project_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    checker = require_project_role(["owner", "admin"])
+    await checker(project_id=str(project_id), current_user=current_user, db=db)
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(404, "Project not found")
+    secrets = project.source_secrets or {}
+    return {
+        provider: {"configured": True, "preview": f"{secret[:4]}{'*' * max(0, len(secret) - 4)}"}
+        for provider, secret in secrets.items()
+    }
+
+
+@router.put("/api/v1/projects/{project_id}/source-secrets/{provider}", status_code=204)
+async def set_source_secret(
+    project_id: UUID,
+    provider: str,
+    secret: str = Body(..., embed=True),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if provider not in _VALID_PROVIDERS:
+        raise HTTPException(400, f"Provider must be one of: {', '.join(sorted(_VALID_PROVIDERS))}")
+    if not secret or len(secret) < 8:
+        raise HTTPException(400, "Secret must be at least 8 characters")
+    checker = require_project_role(["owner", "admin"])
+    await checker(project_id=str(project_id), current_user=current_user, db=db)
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(404, "Project not found")
+    secrets = dict(project.source_secrets or {})
+    secrets[provider] = secret
+    project.source_secrets = secrets
+    await db.commit()
+    return Response(status_code=204)
+
+
+@router.delete("/api/v1/projects/{project_id}/source-secrets/{provider}", status_code=204)
+async def delete_source_secret(
+    project_id: UUID,
+    provider: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    checker = require_project_role(["owner", "admin"])
+    await checker(project_id=str(project_id), current_user=current_user, db=db)
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(404, "Project not found")
+    secrets = dict(project.source_secrets or {})
+    if provider not in secrets:
+        raise HTTPException(404, "Provider not configured")
+    del secrets[provider]
+    project.source_secrets = secrets
     await db.commit()
     return Response(status_code=204)

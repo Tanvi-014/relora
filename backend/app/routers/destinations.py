@@ -139,6 +139,22 @@ async def delete_destination(
     return Response(status_code=204)
 
 
+@router.post("/api/v1/destinations/{dest_id}/reset-circuit")
+async def reset_circuit_breaker(
+    dest_id: UUID,
+    tenant_id: str = Depends(get_tenant_from_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    dest = await _get_dest_for_tenant(db, dest_id, tenant_id)
+    dest.circuit_state = "closed"
+    dest.circuit_failure_count = 0
+    dest.circuit_opened_at = None
+    dest.circuit_next_retry_at = None
+    await db.commit()
+    await db.refresh(dest)
+    return {"status": "reset", "circuit_state": dest.circuit_state}
+
+
 @router.post("/api/v1/destinations/{dest_id}/test")
 async def test_destination(
     dest_id: UUID,
@@ -154,6 +170,39 @@ async def test_destination(
         return {"success": 200 <= r.status_code < 300, "status_code": r.status_code, "body": r.text[:500]}
     except Exception as exc:
         return {"success": False, "error": str(exc)}
+
+
+@router.post("/api/v1/destinations/{dest_id}/send-test-event", status_code=201)
+async def send_test_event(
+    dest_id: UUID,
+    tenant_id: str = Depends(get_tenant_from_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a real test webhook that flows through the full delivery pipeline (is_simulation=True)."""
+    from datetime import datetime, timezone
+    from app.models import Webhook
+    dest = await _get_dest_for_tenant(db, dest_id, tenant_id)
+    webhook = Webhook(
+        tenant_id=tenant_id,
+        event_id=f"evt_test_{_uuid_mod.uuid4().hex[:10]}",
+        destination_url=dest.url,
+        destination_id=dest.id,
+        payload={
+            "event_type": "relora.test",
+            "data": {
+                "message": "Hello from Relora!",
+                "destination": dest.name,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        },
+        headers={"Content-Type": "application/json", "X-Relora-Test": "true"},
+        is_simulation=True,
+        max_retries=0,
+    )
+    db.add(webhook)
+    await db.commit()
+    await db.refresh(webhook)
+    return {"webhook_id": str(webhook.id), "status": "queued", "destination": dest.name}
 
 
 @router.get("/api/v1/destinations/{dest_id}/stats")

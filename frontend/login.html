@@ -1,38 +1,338 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hermes — Sign In</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sign in — Relora</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;min-height:100vh}
+body{
+  font-family:'Inter',-apple-system,sans-serif;
+  -webkit-font-smoothing:antialiased;
+  color:#E8EFF7;background:#060810;
+}
+a{color:#00D47E;text-decoration:none}
+a:hover{text-decoration:underline}
+
+.auth-layout{display:grid;grid-template-columns:55fr 45fr;min-height:100vh}
+@media(max-width:880px){.auth-layout{grid-template-columns:1fr}}
+
+/* ── Brand panel ── */
+.auth-brand{
+  background:#060810;
+  position:relative;overflow:hidden;
+  display:flex;flex-direction:column;
+  border-right:1px solid #1C2A3A;
+}
+@media(max-width:880px){.auth-brand{display:none}}
+
+/* Subtle dot grid */
+.auth-brand::before{
+  content:'';position:absolute;inset:0;
+  background-image:
+    linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);
+  background-size:48px 48px;
+  pointer-events:none;
+}
+
+/* Green glow, very subtle */
+.auth-glow{
+  position:absolute;top:-120px;left:-80px;
+  width:520px;height:520px;
+  background:radial-gradient(circle,rgba(0,212,126,.07) 0%,transparent 60%);
+  pointer-events:none;
+}
+
+.auth-brand-inner{
+  position:relative;z-index:1;
+  display:flex;flex-direction:column;
+  height:100%;padding:40px 52px 44px;
+}
+
+/* Logo */
+.brand-logo{
+  display:inline-flex;align-items:center;gap:10px;
+  font-family:'Space Grotesk',sans-serif;
+  font-size:15px;font-weight:700;letter-spacing:-.3px;
+  color:#E8EFF7;text-decoration:none;flex-shrink:0;
+  transition:opacity .15s;
+}
+.brand-logo:hover{text-decoration:none;opacity:.8}
+.brand-logo-hex{
+  width:30px;height:30px;
+  border:1px solid #00D47E;
+  color:#00D47E;
+  display:flex;align-items:center;justify-content:center;
+  flex-shrink:0;
+}
+
+/* Hero copy */
+.brand-hero{margin-top:auto}
+.brand-eyebrow{
+  display:inline-flex;align-items:center;gap:7px;
+  font-family:'JetBrains Mono',monospace;
+  font-size:11px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;
+  color:#00D47E;margin-bottom:20px;
+}
+.brand-eyebrow-dot{
+  width:6px;height:6px;border-radius:50%;
+  background:#00D47E;
+  animation:dot-pulse 2.2s ease-in-out infinite;
+}
+@keyframes dot-pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+.brand-hero h2{
+  font-family:'Space Grotesk',sans-serif;
+  font-size:clamp(1.7rem,2.3vw,2.2rem);font-weight:700;
+  line-height:1.08;letter-spacing:-.04em;
+  color:#E8EFF7;margin-bottom:14px;
+}
+.brand-hero p{
+  font-size:14px;line-height:1.72;
+  color:rgba(232,239,247,.4);max-width:340px;
+}
+
+/* Feature list */
+.brand-features{
+  display:flex;flex-direction:column;gap:0;
+  margin-top:32px;margin-bottom:36px;
+  border-top:1px solid #1C2A3A;
+}
+.brand-feature{
+  display:flex;align-items:flex-start;gap:14px;
+  padding:14px 0;border-bottom:1px solid #1C2A3A;
+}
+.brand-feature:last-child{border-bottom:none}
+.brand-feature-check{
+  width:20px;height:20px;flex-shrink:0;margin-top:1px;
+  border:1px solid rgba(0,212,126,.3);
+  color:#00D47E;
+  display:flex;align-items:center;justify-content:center;
+  font-family:'JetBrains Mono',monospace;font-size:11px;
+}
+.brand-feature-title{font-size:13px;font-weight:600;color:#E8EFF7;line-height:1.4;margin-bottom:2px}
+.brand-feature-desc{font-size:12px;color:rgba(232,239,247,.35);line-height:1.55}
+
+/* Stats row */
+.brand-stats{
+  display:flex;gap:32px;flex-wrap:wrap;
+  padding-top:20px;border-top:1px solid #1C2A3A;
+  margin-top:auto;
+}
+.brand-stat-num{
+  display:block;
+  font-family:'JetBrains Mono',monospace;
+  font-size:17px;font-weight:500;letter-spacing:-.04em;
+  color:#00D47E;line-height:1;margin-bottom:4px;
+}
+.brand-stat-lbl{font-size:11px;color:rgba(232,239,247,.3);font-weight:400}
+
+/* ── Form panel ── */
+.auth-form-panel{
+  background:#060810;
+  border-left:1px solid #1C2A3A;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  padding:40px 24px;position:relative;
+}
+.auth-topbar{
+  display:none;position:absolute;top:0;left:0;right:0;
+  height:56px;align-items:center;padding:0 24px;
+  border-bottom:1px solid #1C2A3A;
+  background:#060810;
+}
+@media(max-width:880px){
+  .auth-topbar{display:flex}
+  .auth-form-panel{justify-content:flex-start;padding-top:96px}
+}
+.topbar-logo{
+  display:flex;align-items:center;gap:9px;
+  font-family:'Space Grotesk',sans-serif;
+  font-size:15px;font-weight:700;color:#E8EFF7;text-decoration:none;
+}
+.topbar-logo:hover{text-decoration:none;opacity:.8}
+.topbar-logo-hex{
+  width:28px;height:28px;
+  border:1px solid #00D47E;color:#00D47E;
+  display:flex;align-items:center;justify-content:center;
+}
+
+.auth-form-inner{width:100%;max-width:360px}
+
+.auth-back{
+  display:inline-flex;align-items:center;gap:5px;
+  font-family:'JetBrains Mono',monospace;
+  font-size:11px;color:rgba(232,239,247,.3);
+  margin-bottom:36px;transition:color .15s;
+}
+.auth-back:hover{color:rgba(232,239,247,.6);text-decoration:none}
+
+.form-title{
+  font-family:'Space Grotesk',sans-serif;
+  font-size:22px;font-weight:700;letter-spacing:-.04em;
+  color:#E8EFF7;margin-bottom:5px;
+}
+.form-sub{
+  font-size:14px;color:rgba(232,239,247,.38);
+  margin-bottom:28px;line-height:1.5;
+}
+
+.field{margin-bottom:18px}
+.field-label{
+  display:block;font-size:12px;font-weight:500;
+  color:rgba(232,239,247,.45);margin-bottom:7px;
+  font-family:'JetBrains Mono',monospace;
+  letter-spacing:.04em;text-transform:uppercase;font-size:10px;
+}
+.field-input{
+  width:100%;padding:11px 14px;
+  background:#0C1220;
+  border:1px solid #1C2A3A;
+  border-radius:2px;
+  font-size:14px;color:#E8EFF7;
+  font-family:'Inter',sans-serif;
+  outline:none;transition:border-color .15s,box-shadow .15s;
+}
+.field-input:focus{
+  border-color:#00D47E;
+  box-shadow:0 0 0 2px rgba(0,212,126,.12);
+}
+.field-input::placeholder{color:rgba(232,239,247,.18)}
+
+.err{
+  font-size:13px;color:#E05252;
+  margin-bottom:14px;display:none;
+  line-height:1.5;padding:10px 12px;
+  background:rgba(224,82,82,.07);
+  border:1px solid rgba(224,82,82,.18);
+  border-radius:2px;
+}
+
+.btn-submit{
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  width:100%;padding:12px;
+  border-radius:2px;
+  font-family:'Space Grotesk',sans-serif;
+  font-size:14px;font-weight:600;
+  background:#00D47E;color:#060810;
+  border:none;cursor:pointer;
+  transition:opacity .12s;margin-top:4px;
+}
+.btn-submit:hover:not(:disabled){opacity:.85}
+.btn-submit:disabled{opacity:.4;cursor:not-allowed}
+
+.form-footer{
+  text-align:center;margin-top:22px;
+  font-size:13px;color:rgba(232,239,247,.28);
+  line-height:1.7;
+}
+.form-footer a{color:#00D47E}
+.form-footer .sep{margin:0 7px;opacity:.4}
+</style>
 </head>
 <body>
-<div class="auth-page">
-  <div class="auth-card">
-    <div class="auth-logo">
-      <div style="font-size:32px;margin-bottom:8px">⚡</div>
-      <div class="auth-logo-text">Hermes</div>
-      <div class="auth-logo-sub">Webhook Delivery Middleware</div>
-    </div>
-    <div class="auth-form-title">Sign in</div>
-    <div class="auth-form-sub">Welcome back. Enter your credentials.</div>
-    <form id="login-form" onsubmit="handleLogin(event)">
-      <div class="input-group">
-        <label class="input-label">Email</label>
-        <input class="input" type="email" id="email" placeholder="you@company.com" required autofocus>
+<div class="auth-layout">
+
+  <!-- Brand panel -->
+  <div class="auth-brand">
+    <div class="auth-glow"></div>
+    <div class="auth-brand-inner">
+
+      <a class="brand-logo" href="/">
+        <div class="brand-logo-hex">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/>
+          </svg>
+        </div>
+        Relora
+      </a>
+
+      <div class="brand-hero">
+        <div class="brand-eyebrow">
+          <span class="brand-eyebrow-dot"></span>
+          production-grade delivery
+        </div>
+        <h2>Return fast.<br>Deliver carefully.</h2>
+        <p>Relora is the operating layer between webhook providers and the systems that cannot miss an event.</p>
+
+        <div class="brand-features">
+          <div class="brand-feature">
+            <div class="brand-feature-check">✓</div>
+            <div>
+              <div class="brand-feature-title">Instant accept, async delivery</div>
+              <div class="brand-feature-desc">Returns 200 OK immediately. Your senders are never blocked.</div>
+            </div>
+          </div>
+          <div class="brand-feature">
+            <div class="brand-feature-check">✓</div>
+            <div>
+              <div class="brand-feature-title">Exponential retry + circuit breakers</div>
+              <div class="brand-feature-desc">Degraded endpoints suspend automatically. Nothing gets lost.</div>
+            </div>
+          </div>
+          <div class="brand-feature">
+            <div class="brand-feature-check">✓</div>
+            <div>
+              <div class="brand-feature-title">Full delivery visibility</div>
+              <div class="brand-feature-desc">Every attempt logged. DLQ intelligence, replay, and alerts built in.</div>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="input-group">
-        <label class="input-label">Password</label>
-        <input class="input" type="password" id="password" placeholder="••••••••" required>
+
+      <div class="brand-stats">
+        <div><span class="brand-stat-num">OSS</span><span class="brand-stat-lbl">open source</span></div>
+        <div><span class="brand-stat-num">MIT</span><span class="brand-stat-lbl">license</span></div>
+        <div><span class="brand-stat-num">~5 min</span><span class="brand-stat-lbl">to set up</span></div>
       </div>
-      <div id="login-error" style="color:var(--danger);font-size:13px;margin-bottom:12px;display:none"></div>
-      <button type="submit" class="btn btn-primary" style="width:100%;padding:10px" id="login-btn">Sign in</button>
-    </form>
-    <div class="auth-footer">
-      Don't have an account? <a href="/register.html">Register</a>
-      &nbsp;·&nbsp; <a href="/reset-password.html">Forgot password?</a>
+
     </div>
   </div>
+
+  <!-- Form panel -->
+  <div class="auth-form-panel">
+    <div class="auth-topbar">
+      <a class="topbar-logo" href="/">
+        <div class="topbar-logo-hex">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/>
+          </svg>
+        </div>
+        Relora
+      </a>
+    </div>
+
+    <div class="auth-form-inner">
+      <a class="auth-back" href="/">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
+        back to site
+      </a>
+      <div class="form-title">Sign in</div>
+      <div class="form-sub">Open the control room for your webhook delivery pipeline.</div>
+      <form id="login-form" onsubmit="handleLogin(event)">
+        <div class="field">
+          <label class="field-label" for="email">Email address</label>
+          <input class="field-input" type="email" id="email" placeholder="you@company.com" required autofocus autocomplete="email">
+        </div>
+        <div class="field">
+          <label class="field-label" for="password">Password</label>
+          <input class="field-input" type="password" id="password" placeholder="••••••••" required autocomplete="current-password">
+        </div>
+        <div id="login-error" class="err"></div>
+        <button type="submit" class="btn-submit" id="login-btn">Sign in</button>
+      </form>
+      <div class="form-footer">
+        No account?&nbsp;<a href="/register.html">Create one for free</a>
+        <span class="sep">·</span>
+        <a href="/reset-password.html">Forgot password?</a>
+      </div>
+    </div>
+  </div>
+
 </div>
 <script src="auth.js"></script>
 </body>

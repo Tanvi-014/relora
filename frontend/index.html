@@ -1,870 +1,885 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Relora — Webhook Delivery</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Relora — Reliable Webhook Delivery</title>
+<meta name="description" content="The reliability layer between your event sources and your application. Instant accept, async retry, full visibility.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ── Reset ── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{font-size:16px;scroll-behavior:smooth}
+body{
+  font-family:'Inter',-apple-system,sans-serif;
+  background:#060810;color:#E8EFF7;line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+a{color:inherit;text-decoration:none}
+button{font-family:inherit;cursor:pointer;border:none}
+img,svg{display:block}
+
+/* ── Tokens ── */
+:root{
+  --bg:#060810;
+  --surface:#0C1220;
+  --surface2:#101829;
+  --border:#1C2A3A;
+  --border2:#243344;
+  --green:#00D47E;
+  --amber:#E8A838;
+  --red:#E05252;
+  --text1:#E8EFF7;
+  --text2:#7A94AA;
+  --text3:#3D5468;
+  --mono:'JetBrains Mono',monospace;
+  --head:'Space Grotesk',-apple-system,sans-serif;
+}
+
+/* ── Layout ── */
+.container{max-width:1120px;margin:0 auto;padding:0 28px}
+.section{padding:96px 0}
+.section-sm{padding:72px 0}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#1C2A3A}
+
+/* ═══════════════════════════════
+   NAV
+═══════════════════════════════ */
+nav{
+  position:sticky;top:0;z-index:100;
+  height:60px;display:flex;align-items:center;
+  padding:0 28px;
+  background:#060810;
+  border-bottom:1px solid #1C2A3A;
+}
+.nav-logo{
+  display:flex;align-items:center;gap:10px;
+  font-family:var(--head);font-size:15px;font-weight:700;
+  letter-spacing:-.3px;color:var(--text1);
+  flex-shrink:0;margin-right:40px;
+}
+.nav-logo-hex{
+  width:30px;height:30px;
+  border:1px solid var(--green);
+  color:var(--green);
+  display:flex;align-items:center;justify-content:center;
+  flex-shrink:0;
+}
+.nav-links{
+  display:flex;align-items:center;flex:1;
+}
+@media(max-width:640px){.nav-links{display:none}}
+.nav-link{
+  padding:6px 14px;
+  font-family:var(--mono);font-size:12px;
+  color:var(--text3);
+  transition:color .1s;
+}
+.nav-link:hover{color:var(--text2)}
+.nav-actions{display:flex;align-items:center;gap:12px;flex-shrink:0}
+.nav-signin{
+  font-family:var(--mono);font-size:12px;
+  color:var(--text3);padding:6px 12px;
+  transition:color .1s;
+}
+.nav-signin:hover{color:var(--text2)}
+.btn-nav{
+  display:inline-flex;align-items:center;gap:7px;
+  padding:8px 18px;
+  font-family:var(--head);font-size:13px;font-weight:600;
+  background:var(--green);color:#060810;
+  border-radius:2px;
+  transition:opacity .12s;
+}
+.btn-nav:hover{opacity:.85}
+
+/* ═══════════════════════════════
+   HERO
+═══════════════════════════════ */
+.hero{padding:80px 0 0}
+.hero-inner{
+  display:grid;grid-template-columns:1fr 420px;
+  gap:56px;align-items:center;
+}
+@media(max-width:920px){.hero-inner{grid-template-columns:1fr;gap:40px}}
+
+.hero-status{
+  display:flex;align-items:center;gap:8px;
+  font-family:var(--mono);font-size:11px;
+  color:var(--text3);margin-bottom:24px;
+  flex-wrap:wrap;
+}
+.status-dot{
+  width:7px;height:7px;border-radius:50%;
+  background:var(--green);flex-shrink:0;
+  animation:blink 2s ease-in-out infinite;
+}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.status-val{color:var(--green)}
+.status-sep{color:#1C2A3A;margin:0 4px}
+
+h1{
+  font-family:var(--head);
+  font-size:clamp(2.2rem,4vw,3.4rem);
+  font-weight:700;line-height:1.06;
+  letter-spacing:-.04em;
+  color:var(--text1);margin-bottom:20px;
+}
+h1 .muted{color:var(--text3)}
+
+.hero-sub{
+  font-size:15px;color:var(--text2);
+  line-height:1.72;max-width:460px;
+  margin-bottom:36px;
+}
+.hero-actions{display:flex;gap:12px;flex-wrap:wrap}
+.btn-primary{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:12px 26px;border-radius:2px;
+  font-family:var(--head);font-size:14px;font-weight:600;
+  background:var(--green);color:#060810;
+  transition:opacity .12s;
+}
+.btn-primary:hover{opacity:.85}
+.btn-outline{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:12px 26px;border-radius:2px;
+  font-family:var(--mono);font-size:12px;
+  background:transparent;color:var(--text3);
+  border:1px solid #1C2A3A;
+  transition:color .12s,border-color .12s;
+}
+.btn-outline:hover{color:var(--text2);border-color:#243344}
+
+/* ── Log Panel ── */
+.log-panel{
+  background:#060810;
+  border:1px solid #1C2A3A;
+  border-top:2px solid var(--green);
+}
+.log-header{
+  display:flex;align-items:center;gap:8px;
+  padding:10px 14px;
+  background:var(--surface);
+  border-bottom:1px solid #1C2A3A;
+}
+.log-title{
+  font-family:var(--mono);font-size:11px;
+  color:var(--text3);letter-spacing:.03em;
+}
+.log-live{
+  margin-left:auto;display:flex;align-items:center;gap:5px;
+  font-family:var(--mono);font-size:10px;color:var(--green);
+}
+.log-live-dot{
+  width:6px;height:6px;border-radius:50%;
+  background:var(--green);
+  animation:blink 2s ease-in-out infinite;
+}
+.log-body{padding:2px 0;max-height:290px;overflow:hidden}
+.log-row{
+  display:flex;align-items:center;gap:10px;
+  padding:7px 14px;
+  font-family:var(--mono);font-size:11.5px;
+  border-bottom:1px solid rgba(28,42,58,.55);
+}
+.log-row:last-child{border-bottom:none}
+.log-row:hover{background:rgba(12,18,32,.7)}
+.glyph{flex-shrink:0;width:14px;text-align:center;font-size:12px}
+.glyph.ok{color:var(--green)}
+.glyph.retry{color:var(--amber)}
+.log-event{flex:1;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.log-ms{color:var(--text3);font-size:10.5px;flex-shrink:0;min-width:28px;text-align:right}
+
+/* ── Pipeline bar ── */
+.pipeline{
+  border-top:1px solid #1C2A3A;
+  border-bottom:1px solid #1C2A3A;
+  margin-top:64px;
+  background:var(--surface);
+  overflow:hidden;
+}
+.pipeline-inner{
+  display:flex;align-items:stretch;
+  font-family:var(--mono);font-size:11px;
+  letter-spacing:.06em;
+}
+.pipeline-node{
+  flex:1;padding:18px 0;text-align:center;
+  color:var(--text3);
+  border-right:1px solid #1C2A3A;
+  transition:background .12s;
+}
+.pipeline-node:last-child{border-right:none}
+.pipeline-node:hover{background:rgba(255,255,255,.02)}
+.pipeline-node.on{color:var(--green)}
+.pipeline-node.warn{color:var(--amber)}
+.pipeline-arrow{
+  display:flex;align-items:center;padding:0 6px;
+  color:#1C2A3A;font-size:16px;flex-shrink:0;
+  border-right:1px solid #1C2A3A;
+}
+@media(max-width:700px){
+  .pipeline-inner{flex-wrap:wrap}
+  .pipeline-node{flex-basis:33%;border-bottom:1px solid #1C2A3A}
+  .pipeline-arrow{display:none}
+}
+
+/* ═══════════════════════════════
+   SHARED SECTION HEADING
+═══════════════════════════════ */
+.eyebrow{
+  font-family:var(--mono);font-size:11px;font-weight:500;
+  letter-spacing:.1em;text-transform:uppercase;
+  color:var(--green);margin-bottom:12px;
+  display:flex;align-items:center;gap:8px;
+}
+.eyebrow::before{content:'//';color:var(--text3)}
+h2{
+  font-family:var(--head);
+  font-size:clamp(1.6rem,2.8vw,2.2rem);
+  font-weight:700;letter-spacing:-.035em;line-height:1.15;
+  color:var(--text1);margin-bottom:12px;
+}
+.section-sub{
+  font-size:14px;color:var(--text2);
+  max-width:500px;line-height:1.75;
+}
+
+/* ═══════════════════════════════
+   FEATURES TABLE
+═══════════════════════════════ */
+.feat-table{
+  margin-top:48px;
+  border:1px solid #1C2A3A;
+}
+.feat-row{
+  display:grid;
+  grid-template-columns:52px 220px 1fr;
+  border-bottom:1px solid #1C2A3A;
+  transition:background .12s;
+}
+.feat-row:last-child{border-bottom:none}
+.feat-row:hover{background:var(--surface)}
+.feat-num{
+  padding:24px 0 24px 16px;
+  font-family:var(--mono);font-size:11px;font-weight:500;
+  color:var(--green);opacity:.55;
+  display:flex;align-items:flex-start;
+  border-right:1px solid #1C2A3A;
+}
+.feat-name{
+  padding:24px 20px;
+  font-family:var(--mono);font-size:12px;font-weight:500;
+  color:var(--text1);
+  border-right:1px solid #1C2A3A;
+  display:flex;flex-direction:column;gap:4px;
+}
+.feat-sub{
+  font-size:10px;font-weight:400;
+  color:var(--text3);letter-spacing:.04em;
+}
+.feat-desc{
+  padding:24px 28px;
+  font-size:13px;color:var(--text2);line-height:1.7;
+}
+.feat-code{
+  font-family:var(--mono);font-size:11px;
+  color:var(--green);
+  background:rgba(0,212,126,.06);
+  padding:1px 5px;
+}
+@media(max-width:760px){
+  .feat-row{grid-template-columns:40px 1fr}
+  .feat-num{padding:18px 0 18px 12px;font-size:10px}
+  .feat-name{border-right:none;border-bottom:1px solid #1C2A3A;grid-column:2;padding:18px 16px 12px}
+  .feat-desc{grid-column:1/-1;padding:12px 16px 20px}
+}
+
+/* ═══════════════════════════════
+   HOW IT WORKS
+═══════════════════════════════ */
+.hiw-bg{
+  background:var(--surface);
+  border-top:1px solid #1C2A3A;
+  border-bottom:1px solid #1C2A3A;
+}
+.hiw-steps{
+  display:grid;
+  grid-template-columns:1fr 28px 1fr 28px 1fr;
+  align-items:start;gap:0;margin-top:52px;
+}
+@media(max-width:760px){
+  .hiw-steps{grid-template-columns:1fr;gap:0}
+  .hiw-arrow-cell{display:none}
+}
+.hiw-step{
+  padding:24px;
+  border:1px solid #1C2A3A;
+  background:#060810;
+}
+.hiw-num{
+  font-family:var(--mono);font-size:10px;font-weight:500;
+  color:var(--green);letter-spacing:.07em;
+  margin-bottom:14px;opacity:.7;
+}
+.hiw-title{
+  font-family:var(--head);font-size:15px;font-weight:600;
+  color:var(--text1);margin-bottom:8px;letter-spacing:-.02em;
+}
+.hiw-desc{font-size:13px;color:var(--text2);line-height:1.7}
+.hiw-desc code{
+  font-family:var(--mono);font-size:11px;
+  background:rgba(0,212,126,.07);
+  padding:1px 5px;color:var(--green);
+}
+.hiw-arrow-cell{
+  display:flex;align-items:center;justify-content:center;
+  color:#1C2A3A;padding-top:56px;
+}
+
+.fail-strip{
+  margin-top:20px;
+  padding:14px 20px;
+  border:1px solid rgba(232,168,56,.14);
+  background:rgba(232,168,56,.03);
+  display:flex;align-items:center;flex-wrap:wrap;gap:6px;
+  font-family:var(--mono);font-size:12px;
+}
+.fail-label{
+  font-size:10px;font-weight:500;
+  letter-spacing:.08em;text-transform:uppercase;
+  color:var(--amber);margin-right:8px;flex-shrink:0;
+}
+.fp-item{color:var(--text3)}
+.fp-sep{color:#1C2A3A}
+.fp-final{color:var(--green);font-weight:500}
+
+/* ═══════════════════════════════
+   CODE SECTION
+═══════════════════════════════ */
+.code-grid{
+  display:grid;grid-template-columns:1fr 1.3fr;
+  gap:60px;align-items:center;
+}
+@media(max-width:820px){.code-grid{grid-template-columns:1fr}}
+.check-list{display:flex;flex-direction:column;gap:12px;margin-top:28px}
+.check-row{
+  display:flex;align-items:flex-start;gap:10px;
+  font-size:13px;color:var(--text2);
+}
+.check-mark{
+  font-family:var(--mono);font-size:12px;
+  color:var(--green);flex-shrink:0;margin-top:2px;
+}
+.code-block{
+  background:#060810;
+  border:1px solid #1C2A3A;
+  border-top:2px solid var(--green);
+  overflow:hidden;
+}
+.code-bar{
+  padding:9px 14px;
+  background:var(--surface);
+  border-bottom:1px solid #1C2A3A;
+  display:flex;align-items:center;gap:6px;
+}
+.code-dot{width:8px;height:8px;border-radius:50%}
+.code-filename{
+  font-family:var(--mono);font-size:11px;
+  color:var(--text3);margin-left:auto;
+}
+.code-body{padding:20px 22px}
+pre{
+  font-family:var(--mono);font-size:12px;
+  line-height:1.85;color:#C8D8E8;
+  margin:0;overflow-x:auto;white-space:pre;
+}
+.c{color:rgba(200,216,232,.25)}
+.s{color:#8DC4A0}
+.ok{color:var(--green)}
+.k{color:var(--amber)}
+
+/* ═══════════════════════════════
+   STATS
+═══════════════════════════════ */
+.stats-grid{
+  display:grid;grid-template-columns:repeat(4,1fr);
+  border:1px solid #1C2A3A;
+  margin-top:48px;
+}
+@media(max-width:640px){.stats-grid{grid-template-columns:repeat(2,1fr)}}
+.stat-cell{
+  padding:32px 28px;
+  border-right:1px solid #1C2A3A;
+}
+.stat-cell:last-child{border-right:none}
+@media(max-width:640px){
+  .stat-cell:nth-child(even){border-right:none}
+  .stat-cell:nth-child(n+3){border-top:1px solid #1C2A3A}
+}
+.stat-num{
+  font-family:var(--mono);
+  font-size:2.3rem;font-weight:500;
+  letter-spacing:-.04em;line-height:1;
+  color:var(--green);margin-bottom:8px;
+}
+.stat-label{
+  font-family:var(--mono);
+  font-size:11px;color:var(--text3);
+  letter-spacing:.04em;
+}
+
+/* ═══════════════════════════════
+   FAQ
+═══════════════════════════════ */
+.faq-list{margin-top:48px;max-width:720px}
+details{border-bottom:1px solid #1C2A3A}
+details:first-child{border-top:1px solid #1C2A3A}
+summary{
+  padding:20px 0;cursor:pointer;list-style:none;
+  display:flex;align-items:center;justify-content:space-between;gap:16px;
+  font-family:var(--head);font-size:14px;font-weight:600;
+  color:var(--text1);letter-spacing:-.01em;user-select:none;
+}
+summary::-webkit-details-marker{display:none}
+.faq-icon{
+  font-family:var(--mono);font-size:18px;
+  color:var(--text3);flex-shrink:0;
+  transition:color .12s;line-height:1;
+}
+details[open] summary .faq-icon{color:var(--green);transform:rotate(45deg)}
+.faq-icon{transition:color .12s,transform .15s}
+.faq-answer{
+  padding:0 0 20px;font-size:14px;
+  color:var(--text2);line-height:1.8;
+}
+.faq-answer code{
+  font-family:var(--mono);font-size:11px;
+  background:rgba(0,212,126,.07);
+  padding:1px 6px;color:var(--green);
+}
+
+/* ═══════════════════════════════
+   CTA
+═══════════════════════════════ */
+.cta-band{
+  padding:96px 28px;text-align:center;
+  background:var(--surface);
+  border-top:1px solid #1C2A3A;
+}
+.cta-band h2{max-width:520px;margin:0 auto 12px}
+.cta-sub{
+  font-size:14px;color:var(--text2);
+  margin-bottom:36px;line-height:1.75;
+}
+.cta-actions{
+  display:flex;gap:12px;justify-content:center;flex-wrap:wrap;
+}
+
+/* ═══════════════════════════════
+   FOOTER
+═══════════════════════════════ */
+footer{
+  padding:24px 28px;
+  border-top:1px solid #1C2A3A;
+  display:flex;align-items:center;justify-content:space-between;
+  flex-wrap:wrap;gap:16px;
+  background:#060810;
+}
+.footer-logo{
+  display:flex;align-items:center;gap:8px;
+  font-family:var(--head);font-size:13px;font-weight:600;
+  color:var(--text3);
+}
+.footer-links{display:flex;gap:28px;flex-wrap:wrap}
+.footer-link{
+  font-family:var(--mono);font-size:12px;
+  color:var(--text3);transition:color .12s;
+}
+.footer-link:hover{color:var(--text2)}
+</style>
 </head>
 <body>
-<div id="app">
 
-  <!-- ── Header ── -->
-  <header class="header">
-    <a class="header-logo" href="#">
-      <div class="logo-icon">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-        </svg>
-      </div>
-      Hermes
+<!-- ═══ NAV ═══ -->
+<nav>
+  <a class="nav-logo" href="/">
+    <div class="nav-logo-hex">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/>
+      </svg>
+    </div>
+    Relora
+  </a>
+
+  <div class="nav-links">
+    <a class="nav-link" href="#features">/features</a>
+    <a class="nav-link" href="#how-it-works">/how-it-works</a>
+    <a class="nav-link" href="#faq">/faq</a>
+    <a class="nav-link" href="/api/docs" target="_blank" rel="noopener">/docs</a>
+  </div>
+
+  <div class="nav-actions">
+    <a class="nav-signin" href="/login.html">sign_in</a>
+    <a class="btn-nav" href="/register.html">
+      DEPLOY
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
     </a>
+  </div>
+</nav>
 
-    <div class="header-spacer"></div>
+<!-- ═══ HERO ═══ -->
+<section class="hero">
+  <div class="container">
+    <div class="hero-inner">
 
-    <div class="ws-status-pill" id="ws-status-pill">
-      <div class="ws-dot connecting" id="ws-dot"></div>
-      <span id="ws-status-text">Connecting</span>
+      <!-- Left: copy -->
+      <div>
+        <div class="hero-status">
+          <div class="status-dot"></div>
+          <span class="status-val">Simulated event stream</span>
+          <span class="status-sep">·</span>
+          <span>your real data appears after setup</span>
+        </div>
+
+        <h1>Webhook delivery<br><span class="muted">you can rely on.</span></h1>
+
+        <p class="hero-sub">
+          Relora sits between your event sources and your application. Instant accept. Async retry. Full delivery visibility. No data loss.
+        </p>
+
+        <div class="hero-actions">
+          <a class="btn-primary" href="/register.html">
+            DEPLOY IN 5 MIN
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </a>
+          <a class="btn-outline" href="/api/docs" target="_blank" rel="noopener">view docs</a>
+        </div>
+      </div>
+
+      <!-- Right: live ingest log -->
+      <div class="log-panel">
+        <div class="log-header">
+          <span class="log-title">relora://ingest.log</span>
+          <div class="log-live">
+            <div class="log-live-dot"></div>
+            LIVE
+          </div>
+        </div>
+        <div class="log-body">
+          <div class="log-row"><span class="glyph ok">✓</span><span class="log-event">payment.succeeded</span><span class="log-ms">2ms</span></div>
+          <div class="log-row"><span class="glyph ok">✓</span><span class="log-event">order.created</span><span class="log-ms">4ms</span></div>
+          <div class="log-row"><span class="glyph ok">✓</span><span class="log-event">user.signup</span><span class="log-ms">3ms</span></div>
+          <div class="log-row"><span class="glyph retry">↺</span><span class="log-event" style="color:var(--amber)">charge.failed — retry 1/5</span><span class="log-ms"></span></div>
+          <div class="log-row"><span class="glyph ok">✓</span><span class="log-event">charge.failed — delivered</span><span class="log-ms">6ms</span></div>
+          <div class="log-row"><span class="glyph ok">✓</span><span class="log-event">invoice.paid</span><span class="log-ms">1ms</span></div>
+          <div class="log-row"><span class="glyph retry">↺</span><span class="log-event" style="color:var(--amber)">webhook.timeout — retry 1/5</span><span class="log-ms"></span></div>
+          <div class="log-row"><span class="glyph ok">✓</span><span class="log-event">webhook.timeout — delivered</span><span class="log-ms">8ms</span></div>
+          <div class="log-row"><span class="glyph ok">✓</span><span class="log-event">order.updated</span><span class="log-ms">3ms</span></div>
+          <div class="log-row"><span class="glyph ok">✓</span><span class="log-event">subscription.renewed</span><span class="log-ms">2ms</span></div>
+          <div class="log-row"><span class="glyph retry">↺</span><span class="log-event" style="color:var(--amber)">payment.created — retry 2/5</span><span class="log-ms"></span></div>
+          <div class="log-row"><span class="glyph ok">✓</span><span class="log-event">payment.created — delivered</span><span class="log-ms">11ms</span></div>
+        </div>
+      </div>
+
+    </div><!-- /hero-inner -->
+
+    <!-- Pipeline bar -->
+    <div class="pipeline">
+      <div class="pipeline-inner">
+        <div class="pipeline-node on">RECEIVE</div>
+        <div class="pipeline-arrow">▶</div>
+        <div class="pipeline-node on">PERSIST</div>
+        <div class="pipeline-arrow">▶</div>
+        <div class="pipeline-node on">RELAY</div>
+        <div class="pipeline-arrow">▶</div>
+        <div class="pipeline-node warn">RETRY</div>
+        <div class="pipeline-arrow">▶</div>
+        <div class="pipeline-node warn">DLQ</div>
+        <div class="pipeline-arrow">▶</div>
+        <div class="pipeline-node">REPLAY</div>
+      </div>
     </div>
 
-    <!-- Project switcher -->
-    <div class="project-switcher" id="ps-trigger">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18M3 12h18M3 17h18"/></svg>
-      <span class="ps-name" id="ps-name">Loading…</span>
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
-      <div class="ps-dropdown" id="ps-dropdown">
-        <div id="ps-list"></div>
-        <div class="ps-separator"></div>
-        <div class="ps-item" onclick="openNewProjectModal()">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
-          New Project
-        </div>
-      </div>
+  </div>
+</section>
+
+<!-- ═══ FEATURES ═══ -->
+<section class="section" id="features">
+  <div class="container">
+    <div style="max-width:600px">
+      <div class="eyebrow">operational guarantees</div>
+      <h2>Everything production needs.</h2>
+      <p class="section-sub">Each feature exists because webhooks fail in the real world. Relora handles the failure cases your application shouldn't have to.</p>
     </div>
 
-    <!-- User menu -->
-    <div class="user-menu" id="user-menu-trigger">
-      <div class="user-avatar" id="user-initial">?</div>
-      <span class="user-email-short" id="user-email-short">…</span>
-      <div class="user-dropdown" id="user-dropdown">
-        <div class="user-dropdown-item" id="user-email-full" style="color:var(--text3);font-size:12px;cursor:default"></div>
-        <div class="ps-separator"></div>
-        <div class="user-dropdown-item danger" onclick="logout()">Sign out</div>
-      </div>
-    </div>
-  </header>
+    <div class="feat-table">
 
-  <!-- ── Body ── -->
-  <div class="main-body">
-    <!-- ── Sidebar ── -->
-    <nav class="sidebar">
-      <div class="nav-section"><span class="nav-section-label">Observe</span></div>
-
-      <div class="nav-item active" data-page="overview" onclick="navTo('overview')">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
-          <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
-        </svg>
-        Overview
-      </div>
-
-      <div class="nav-item" data-page="webhooks" onclick="navTo('webhooks')">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M22 2L11 13"/><path d="M22 2L15 22l-4-9-9-4 20-7z"/>
-        </svg>
-        Webhooks
-        <span class="nav-badge hidden" id="failed-badge">0</span>
-      </div>
-
-      <div class="nav-item" data-page="dlq-intelligence" onclick="navTo('dlq-intelligence')">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-          <path d="M11 8v3l2 2"/>
-        </svg>
-        DLQ Intelligence
-      </div>
-
-      <div class="nav-section"><span class="nav-section-label">Configure</span></div>
-
-      <div class="nav-item" data-page="destinations" onclick="navTo('destinations')">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/>
-          <line x1="12" y1="3" x2="12" y2="9"/><line x1="12" y1="15" x2="12" y2="21"/>
-          <line x1="3" y1="12" x2="9" y2="12"/><line x1="15" y1="12" x2="21" y2="12"/>
-        </svg>
-        Destinations
-      </div>
-
-      <div class="nav-item" data-page="event-types" onclick="navTo('event-types')">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-          <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/>
-        </svg>
-        Event Types
-      </div>
-
-      <div class="nav-item" data-page="alerts" onclick="navTo('alerts')">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-        </svg>
-        Alerts
-      </div>
-
-      <div class="nav-section"><span class="nav-section-label">Tools</span></div>
-
-      <div class="nav-item" data-page="analytics" onclick="navTo('analytics')">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
-        </svg>
-        Analytics
-      </div>
-
-      <div class="nav-item" data-page="simulate" onclick="navTo('simulate')">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-          <polygon points="5 3 19 12 5 21 5 3"/>
-        </svg>
-        Simulate
-      </div>
-
-      <div class="nav-item" data-page="replay" onclick="navTo('replay')">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/>
-        </svg>
-        Bulk Replay
-      </div>
-
-      <div class="nav-item" data-page="ai" onclick="navTo('ai')">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/>
-        </svg>
-        AI Tools
-      </div>
-
-      <div class="nav-section"><span class="nav-section-label">Account</span></div>
-
-      <div class="nav-item" data-page="team" onclick="navTo('team')">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-          <circle cx="9" cy="7" r="4"/>
-          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-        </svg>
-        Team
-      </div>
-
-      <div class="nav-item" data-page="settings" onclick="navTo('settings')">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="3"/>
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-        </svg>
-        Settings
-      </div>
-    </nav>
-
-    <!-- ── Content + Detail panel ── -->
-    <div style="display:flex;flex:1;overflow:hidden">
-      <div class="content" id="content-area">
-
-        <!-- ══════════════════════════════════════════
-             Overview page — system health dashboard
-             ══════════════════════════════════════════ -->
-        <div class="page active" id="page-overview">
-
-          <!-- Health banner -->
-          <div class="health-banner healthy" id="health-banner">
-            <div class="health-banner-left">
-              <div class="health-dot-large" id="health-dot-large"></div>
-              <div>
-                <div class="health-banner-title" id="health-banner-title">System Healthy</div>
-                <div class="health-banner-sub" id="health-banner-sub">All destinations delivering normally</div>
-              </div>
-            </div>
-            <div class="health-banner-right">
-              <span class="health-updated" id="health-updated">—</span>
-              <button class="btn btn-ghost btn-sm" onclick="loadDashboard()" title="Refresh">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
-              </button>
-            </div>
-          </div>
-
-          <!-- KPI row -->
-          <div class="kpi-grid">
-            <div class="kpi-card">
-              <div class="kpi-label">Success Rate</div>
-              <div class="kpi-value" id="kpi-success-rate">—</div>
-              <div class="kpi-sub" id="kpi-success-sub">last 24 hours</div>
-            </div>
-            <div class="kpi-card">
-              <div class="kpi-label">P95 Latency</div>
-              <div class="kpi-value" id="kpi-p95">—</div>
-              <div class="kpi-sub">all destinations · 24 h</div>
-            </div>
-            <div class="kpi-card kpi-card--alert" id="kpi-dlq-card">
-              <div class="kpi-label">DLQ Depth</div>
-              <div class="kpi-value" id="kpi-dlq">—</div>
-              <div class="kpi-sub" id="kpi-dlq-sub">failed webhooks</div>
-            </div>
-            <div class="kpi-card" id="kpi-circuit-card">
-              <div class="kpi-label">Circuit Breakers</div>
-              <div class="kpi-value" id="kpi-circuit">—</div>
-              <div class="kpi-sub" id="kpi-circuit-sub">destinations healthy</div>
-            </div>
-          </div>
-
-          <!-- SLO breach + schema drift alerts -->
-          <div id="slo-breaches"></div>
-          <div id="schema-drift-alert"></div>
-
-          <!-- Source vs destination health split -->
-          <div class="card card--compact" style="margin-bottom:16px">
-            <div class="card-header">
-              <div class="card-title">Health Split</div>
-              <span class="card-meta">Source vs destination</span>
-            </div>
-            <div id="health-split" class="health-split-body"></div>
-          </div>
-
-          <!-- Active incidents (hidden when none) -->
-          <div id="incidents-section" style="display:none">
-            <div class="section-header">
-              <span class="section-title">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                Active Incidents
-              </span>
-              <a class="section-link" onclick="navTo('dlq-intelligence')">View all →</a>
-            </div>
-            <div id="incidents-list"></div>
-          </div>
-
-          <!-- Lower: sparkline + recent failures -->
-          <div class="overview-lower">
-            <!-- Throughput sparkline -->
-            <div class="card">
-              <div class="card-header">
-                <div class="card-title">Delivery Throughput</div>
-                <span class="card-meta">Last 24 hours</span>
-              </div>
-              <div class="sparkline-wrap" id="throughput-chart">
-                <div class="sparkline-empty">No delivery data yet</div>
-              </div>
-              <div class="sparkline-legend">
-                <span class="sparkline-legend-dot delivered"></span> Delivered
-                <span class="sparkline-legend-dot failed" style="margin-left:16px"></span> Failed
-              </div>
-            </div>
-
-            <!-- Recent failures -->
-            <div class="card">
-              <div class="card-header">
-                <div class="card-title">Recent Failures</div>
-                <a class="card-link" onclick="navTo('webhooks')">View all →</a>
-              </div>
-              <div id="recent-failures-list">
-                <div class="empty-state-sm">
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg>
-                  <div>No recent failures</div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-        </div><!-- /page-overview -->
-
-        <!-- ══════════════════════════════════════════
-             Webhooks page
-             ══════════════════════════════════════════ -->
-        <div class="page" id="page-webhooks">
-          <div class="page-title">Webhooks</div>
-          <div class="page-subtitle">All ingested webhook events and their delivery status</div>
-          <div class="table-wrap">
-            <div class="table-toolbar">
-              <div class="search-input">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text3)"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-                <input class="input" id="wh-search" placeholder="Search payload content…" oninput="debounceSearch()" style="padding-left:32px">
-              </div>
-              <select class="select" style="width:150px" id="wh-status-filter" onchange="loadWebhooks(1)">
-                <option value="">All statuses</option>
-                <option value="pending">Pending</option>
-                <option value="processing">Processing</option>
-                <option value="completed">Completed</option>
-                <option value="failed">Failed</option>
-              </select>
-              <select class="select" style="width:180px" id="wh-dest-filter" onchange="loadWebhooks(1)">
-                <option value="">All destinations</option>
-              </select>
-              <button class="btn btn-secondary btn-sm" onclick="loadWebhooks(1)">Refresh</button>
-            </div>
-            <div id="webhooks-table-body">
-              <div class="empty-state">
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><path d="M22 2L11 13"/><path d="M22 2L15 22l-4-9-9-4 20-7z"/></svg>
-                <div class="title">No webhooks yet</div>
-                <div class="desc">Ingest a webhook to get started</div>
-              </div>
-            </div>
-            <div class="pagination" id="wh-pagination"></div>
-          </div>
+      <div class="feat-row">
+        <div class="feat-num">01</div>
+        <div class="feat-name">
+          FIFO_DELIVERY
+          <span class="feat-sub">per ordering key</span>
         </div>
-
-        <!-- ══════════════════════════════════════════
-             Destinations page
-             ══════════════════════════════════════════ -->
-        <div class="page" id="page-destinations">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-            <div>
-              <div class="page-title">Destinations</div>
-              <div class="page-subtitle" style="margin-bottom:0">Delivery endpoints and circuit breaker state</div>
-            </div>
-            <button class="btn btn-primary" onclick="openDestModal()">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
-              New Destination
-            </button>
-          </div>
-          <!-- Circuit breaker open banner (shown when any dest is open) -->
-          <div class="cb-open-banner hidden" id="cb-open-banner">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-            <span id="cb-open-banner-text">1 destination circuit breaker is OPEN — deliveries suspended.</span>
-          </div>
-          <div class="table-wrap" id="dest-table-wrap">
-            <table id="dest-table">
-              <thead>
-                <tr>
-                  <th style="width:100px">Status</th>
-                  <th>Name</th>
-                  <th>URL</th>
-                  <th style="width:90px">Retries</th>
-                  <th style="width:100px">Circuit</th>
-                  <th style="width:80px"></th>
-                </tr>
-              </thead>
-              <tbody id="dest-tbody">
-                <tr><td colspan="6">
-                  <div class="empty-state">
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/></svg>
-                    <div class="title">No destinations yet</div>
-                    <div class="desc">Add a destination to start routing webhooks to your endpoints.</div>
-                  </div>
-                </td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- ══════════════════════════════════════════
-             Event Types page
-             ══════════════════════════════════════════ -->
-        <div class="page" id="page-event-types">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
-            <div>
-              <div class="page-title">Event Types</div>
-              <div class="page-subtitle" style="margin-bottom:0">Schema catalog for your webhook events</div>
-            </div>
-            <button class="btn btn-primary" onclick="openEventTypeModal()">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
-              New Event Type
-            </button>
-          </div>
-          <div id="event-types-list"></div>
-        </div>
-
-        <!-- ══════════════════════════════════════════
-             Alerts page
-             ══════════════════════════════════════════ -->
-        <div class="page" id="page-alerts">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
-            <div>
-              <div class="page-title">Alerts</div>
-              <div class="page-subtitle" style="margin-bottom:0">Get notified when webhooks hit the dead letter queue</div>
-            </div>
-            <button class="btn btn-primary" onclick="openAlertModal()">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
-              New Alert Channel
-            </button>
-          </div>
-          <div id="alerts-list"></div>
-        </div>
-
-        <!-- ══════════════════════════════════════════
-             Simulate page
-             ══════════════════════════════════════════ -->
-        <div class="page" id="page-simulate">
-          <div class="page-title">Simulate</div>
-          <div class="page-subtitle">Fire realistic test events from known providers — watch them deliver in real time</div>
-          <div style="display:grid;grid-template-columns:360px 1fr;gap:20px">
-            <div class="card">
-              <div class="card-title" style="margin-bottom:16px">Event Builder</div>
-              <div class="input-group">
-                <label class="input-label">Provider</label>
-                <select class="select" id="sim-provider" onchange="loadSimEventTypes()">
-                  <option value="stripe">Stripe</option>
-                  <option value="github">GitHub</option>
-                  <option value="shopify">Shopify</option>
-                </select>
-              </div>
-              <div class="input-group">
-                <label class="input-label">Event Type</label>
-                <select class="select" id="sim-event-type"></select>
-              </div>
-              <div class="input-group">
-                <label class="input-label">Destination</label>
-                <select class="select" id="sim-destination">
-                  <option value="">Select destination…</option>
-                </select>
-              </div>
-              <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick="fireSimulation()">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                Fire Webhook
-              </button>
-            </div>
-            <div class="card">
-              <div class="card-title" style="margin-bottom:16px">Result</div>
-              <div id="sim-result" style="color:var(--text3);font-size:13px">Fire a webhook to see the result here.</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- ══════════════════════════════════════════
-             Analytics page
-             ══════════════════════════════════════════ -->
-        <div class="page" id="page-analytics">
-          <div class="page-title">Analytics</div>
-          <div class="page-subtitle">Delivery SLA — P50 / P95 / P99 latency per destination, last 7 days</div>
-          <div id="analytics-content">
-            <div class="empty-state">
-              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-              <div class="title">Loading…</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- ══════════════════════════════════════════
-             AI Tools page
-             ══════════════════════════════════════════ -->
-        <div class="page" id="page-ai">
-          <div class="page-title">AI Intelligence</div>
-          <div class="page-subtitle">Claude-powered payload analysis, filter suggestions, and transform generation</div>
-          <div id="ai-disabled-notice" style="display:none" class="inline-banner inline-banner--warn">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-            <span>AI features not enabled. Set <span class="inline-code">ENABLE_AI_FEATURES=true</span> and <span class="inline-code">ANTHROPIC_API_KEY=sk-…</span> in your <span class="inline-code">.env</span>, then restart the API.</span>
-          </div>
-          <div id="ai-tools-content">
-            <div class="tabs" id="ai-tabs">
-              <div class="tab active" data-tab="analyze" onclick="switchAiTab('analyze')">Analyze Payload</div>
-              <div class="tab" data-tab="filter" onclick="switchAiTab('filter')">Suggest Filter</div>
-              <div class="tab" data-tab="transform" onclick="switchAiTab('transform')">Suggest Transform</div>
-            </div>
-
-            <!-- Analyze tab -->
-            <div id="ai-tab-analyze" class="ai-tab-panel" style="display:grid;grid-template-columns:2fr 3fr;gap:16px">
-              <div>
-                <div class="input-group">
-                  <label class="input-label">Payload JSON</label>
-                  <textarea class="textarea code-editor" id="ai-payload" rows="12" placeholder='{"type":"payment_intent.succeeded","data":{"object":{"id":"pi_abc","amount":4999}}}'></textarea>
-                </div>
-                <button class="btn btn-primary" style="width:100%" onclick="aiAnalyze()">Analyze with Claude</button>
-              </div>
-              <div class="ai-result-panel">
-                <div class="ai-result-panel-title">Result</div>
-                <div id="ai-result" class="ai-result-empty">Fire an analysis to see results here.</div>
-              </div>
-            </div>
-
-            <!-- Filter tab -->
-            <div id="ai-tab-filter" class="ai-tab-panel" style="display:none;grid-template-columns:2fr 3fr;gap:16px">
-              <div>
-                <div class="input-group">
-                  <label class="input-label">Sample Payload JSON</label>
-                  <textarea class="textarea code-editor" id="ai-filter-payload" rows="8" placeholder='{"type":"payment.succeeded","data":{"amount":4999}}'></textarea>
-                </div>
-                <div class="input-group">
-                  <label class="input-label">What do you want to filter?</label>
-                  <input class="input" id="ai-filter-desc" placeholder="Only successful payments over $100">
-                </div>
-                <button class="btn btn-primary" style="width:100%" onclick="aiSuggestFilter()">Generate Filter</button>
-              </div>
-              <div class="ai-result-panel">
-                <div class="ai-result-panel-title">Generated Filter</div>
-                <div id="ai-filter-result" class="ai-result-empty">Run generation to see the filter expression here.</div>
-              </div>
-            </div>
-
-            <!-- Transform tab -->
-            <div id="ai-tab-transform" class="ai-tab-panel" style="display:none;grid-template-columns:2fr 3fr;gap:16px">
-              <div>
-                <div class="input-group">
-                  <label class="input-label">Sample Payload JSON</label>
-                  <textarea class="textarea code-editor" id="ai-transform-payload" rows="8" placeholder='{"type":"payment.succeeded","data":{"object":{"id":"pi_abc","amount":4999}}}'></textarea>
-                </div>
-                <div class="input-group">
-                  <label class="input-label">Describe the output shape</label>
-                  <input class="input" id="ai-transform-desc" placeholder="Give me just the id and amount in cents">
-                </div>
-                <button class="btn btn-primary" style="width:100%" onclick="aiSuggestTransform()">Generate Transform</button>
-              </div>
-              <div class="ai-result-panel">
-                <div class="ai-result-panel-title">Generated Transform</div>
-                <div id="ai-transform-result" class="ai-result-empty">Run generation to see the JavaScript function here.</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- ══════════════════════════════════════════
-             Bulk Replay page
-             ══════════════════════════════════════════ -->
-        <div class="page" id="page-replay">
-          <div class="page-title">Replay Jobs</div>
-          <div class="page-subtitle">Re-queue webhooks from a time window — essential for post-incident recovery</div>
-          <!-- Compact form bar -->
-          <div class="card" style="margin-bottom:16px">
-            <div style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap">
-              <div class="input-group" style="flex:1;min-width:160px;margin-bottom:0">
-                <label class="input-label">From</label>
-                <input class="input" type="datetime-local" id="replay-from">
-              </div>
-              <div class="input-group" style="flex:1;min-width:160px;margin-bottom:0">
-                <label class="input-label">To</label>
-                <input class="input" type="datetime-local" id="replay-to">
-              </div>
-              <div class="input-group" style="flex:1;min-width:160px;margin-bottom:0">
-                <label class="input-label">Destination</label>
-                <select class="select" id="replay-dest"><option value="">All destinations</option></select>
-              </div>
-              <div class="input-group" style="width:140px;margin-bottom:0">
-                <label class="input-label">Rate (events/min)</label>
-                <input class="input" type="number" id="replay-rate" value="100" min="1" max="1000">
-              </div>
-              <button class="btn btn-primary" style="flex-shrink:0;align-self:flex-end" onclick="startBulkReplay()">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
-                Start Replay Job
-              </button>
-            </div>
-          </div>
-          <!-- Jobs table -->
-          <div class="table-wrap">
-            <div class="table-toolbar" style="padding:12px 16px">
-              <span style="font-size:13px;font-weight:500">Replay Jobs</span>
-            </div>
-            <div id="replay-jobs-list">
-              <div class="empty-state">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
-                <div class="title">No replay jobs yet</div>
-                <div class="desc">Replay re-queues failed webhooks through the delivery pipeline at a controlled rate.</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- ══════════════════════════════════════════
-             Team page
-             ══════════════════════════════════════════ -->
-        <div class="page" id="page-team">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
-            <div>
-              <div class="page-title">Team</div>
-              <div class="page-subtitle" style="margin-bottom:0">Manage project members and roles</div>
-            </div>
-            <button class="btn btn-primary" onclick="openInviteModal()">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
-              Invite Member
-            </button>
-          </div>
-          <div class="card"><div id="team-list"></div></div>
-        </div>
-
-        <!-- ══════════════════════════════════════════
-             Settings page
-             ══════════════════════════════════════════ -->
-        <div class="page" id="page-settings">
-          <div class="page-title">Settings</div>
-          <div class="page-subtitle">Project configuration and API credentials</div>
-          <div style="max-width:600px">
-            <div class="settings-section">
-              <div class="settings-section-title">API Credentials</div>
-              <div style="margin-bottom:6px;font-size:13px;font-weight:500;color:var(--text)">Project API Key</div>
-              <div style="display:flex;gap:8px;margin-bottom:6px">
-                <input class="input" id="settings-api-key" readonly style="font-family:var(--mono);font-size:12px">
-                <button class="btn btn-secondary btn-sm" onclick="copyApiKey()">Copy</button>
-                <button class="btn btn-secondary btn-sm" onclick="rotateApiKey()" id="rotate-key-btn">Rotate</button>
-              </div>
-              <div style="font-size:12px;color:var(--text3)">
-                Authenticate as <span class="inline-code">X-Relora-API-Key: &lt;key&gt;</span> or <span class="inline-code">Authorization: Bearer &lt;key&gt;</span>
-              </div>
-            </div>
-
-            <div class="settings-section">
-              <div class="settings-section-title">Webhook Ingestion</div>
-              <div style="margin-bottom:6px;font-size:13px;font-weight:500;color:var(--text)">Ingestion Endpoint</div>
-              <div style="display:flex;gap:8px;margin-bottom:6px">
-                <input class="input" id="settings-ingest-url" readonly style="font-family:var(--mono);font-size:12px" value="">
-                <button class="btn btn-secondary btn-sm" onclick="copyIngestUrl()">Copy</button>
-              </div>
-              <div style="font-size:12px;color:var(--text3)">
-                <span class="inline-code">POST</span> to this URL to ingest a webhook event. Include your API key in the header.
-              </div>
-            </div>
-
-            <div class="settings-section">
-              <div class="settings-section-title">Danger Zone</div>
-              <div class="settings-danger-zone">
-                <div class="settings-danger-title">Delete Project</div>
-                <div class="settings-danger-desc">Permanently delete this project and all associated webhooks, destinations, and data. This action cannot be undone.</div>
-                <button class="btn btn-danger btn-sm" onclick="confirmDeleteProject()">Delete Project</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- ══════════════════════════════════════════
-             DLQ Intelligence page
-             ══════════════════════════════════════════ -->
-        <div class="page" id="page-dlq-intelligence">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-            <div>
-              <div class="page-title">DLQ Intelligence</div>
-              <div class="page-subtitle" style="margin-bottom:0">Failure classification, incident management, and root cause analysis</div>
-            </div>
-            <button class="btn btn-secondary btn-sm" onclick="loadDLQIntelligence()">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
-              Refresh
-            </button>
-          </div>
-          <div id="dlq-loading" class="loading">Loading…</div>
-          <div id="dlq-error" class="dlq-error" style="display:none;"></div>
-          <div id="dlq-content" style="display:none;">
-            <!-- Health score row -->
-            <div class="dlq-health-row" id="health-score-circle">
-              <div class="dlq-score-block">
-                <span class="dlq-score-number" id="health-score-value">92</span>
-                <span class="dlq-score-label">/ 100</span>
-              </div>
-              <div class="dlq-score-bar-wrap">
-                <div class="dlq-score-bar" id="dlq-score-bar"></div>
-              </div>
-              <div class="dlq-score-status">
-                <span class="dlq-score-title" id="health-status">Healthy</span>
-                <span class="dlq-score-desc" id="health-description">Overall system health is good</span>
-              </div>
-              <div class="incident-summary">
-                <div class="incident-stat"><div class="incident-stat-value" id="total-incidents">0</div><div class="incident-stat-label">Incidents</div></div>
-                <div class="incident-stat"><div class="incident-stat-value" id="open-incidents">0</div><div class="incident-stat-label">Open</div></div>
-                <div class="incident-stat"><div class="incident-stat-value" id="critical-incidents">0</div><div class="incident-stat-label">Critical</div></div>
-                <div class="incident-stat"><div class="incident-stat-value" id="affected-destinations">0</div><div class="incident-stat-label">Affected</div></div>
-              </div>
-            </div>
-            <!-- Analysis grid: 3 columns -->
-            <div class="dlq-grid-3">
-              <div class="dashboard-card"><h3>Failure Breakdown</h3><div id="failure-breakdown" class="failure-breakdown"></div></div>
-              <div class="dashboard-card">
-                <h3>DLQ Growth Trend</h3>
-                <div id="trend-graph" class="trend-graph"></div>
-                <div class="trend-state-label">Trend: <span id="trend-state" class="trend-state-value">STABLE</span></div>
-              </div>
-              <div class="dashboard-card"><h3>Top Failing Destinations</h3><div id="top-destinations"></div></div>
-            </div>
-            <!-- Root causes + active incidents full-width -->
-            <div class="dlq-grid-2" style="margin-top:16px">
-              <div class="dashboard-card"><h3>Root Cause Analysis</h3><div id="root-causes"></div></div>
-              <div class="dashboard-card"><h3>Active Incidents</h3><div id="active-incidents"></div></div>
-            </div>
-          </div>
-        </div>
-
-      </div><!-- /content -->
-
-      <!-- ── Detail panel ── -->
-      <div class="detail-panel hidden" id="detail-panel">
-        <div class="panel-header">
-          <div>
-            <div style="font-size:13px;font-weight:600" id="panel-webhook-id">—</div>
-            <div style="font-size:11px;color:var(--text3);margin-top:2px" id="panel-created-at">—</div>
-          </div>
-          <button class="btn btn-ghost btn-sm" onclick="closePanel()" style="padding:4px 8px">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </div>
-        <div class="panel-body">
-          <div class="panel-section">
-            <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
-              <span id="panel-status-badge"></span>
-              <button class="btn btn-xs btn-secondary" id="panel-replay-btn" onclick="replaySelected()">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
-                Replay
-              </button>
-            </div>
-            <div class="kv-list">
-              <div class="kv-row"><span class="kv-key">Destination</span><span class="kv-val" id="panel-dest-url"></span></div>
-              <div class="kv-row"><span class="kv-key">Event ID</span><span class="kv-val" id="panel-event-id"></span></div>
-              <div class="kv-row"><span class="kv-key">Tenant</span><span class="kv-val" id="panel-tenant-id"></span></div>
-              <div class="kv-row"><span class="kv-key">Retries</span><span class="kv-val" id="panel-retries"></span></div>
-              <div class="kv-row"><span class="kv-key">Idempotency Key</span><span class="kv-val" id="panel-idempotency"></span></div>
-              <div class="kv-row"><span class="kv-key">Ordering Key</span><span class="kv-val" id="panel-ordering-key"></span></div>
-            </div>
-          </div>
-          <div class="panel-section">
-            <div class="panel-section-title">Payload</div>
-            <div class="json-view" id="panel-payload"></div>
-          </div>
-          <div class="panel-section">
-            <div class="panel-section-title">Delivery Attempts</div>
-            <div class="timeline" id="panel-timeline"></div>
-          </div>
-          <div class="panel-section">
-            <div class="panel-section-title">Inbound Headers</div>
-            <div class="json-view" id="panel-headers"></div>
-          </div>
-        </div>
+        <div class="feat-desc">Events delivered in strict order per customer or ordering key, even under concurrent load. Implemented with <span class="feat-code">SELECT FOR UPDATE SKIP LOCKED</span>. No external message broker required.</div>
       </div>
-    </div><!-- /content+panel -->
-  </div><!-- /main-body -->
-</div><!-- /app -->
 
-<div id="toast-container"></div>
+      <div class="feat-row">
+        <div class="feat-num">02</div>
+        <div class="feat-name">
+          EXP_RETRY
+          <span class="feat-sub">with Retry-After support</span>
+        </div>
+        <div class="feat-desc">Exponential backoff: 30s → 1m → 2m → 4m → &hellip; Respects <span class="feat-code">Retry-After</span> headers. Configurable max attempts per destination. Every attempt logged with status code, response body, and latency.</div>
+      </div>
 
-<!-- ══ Modals ══ -->
+      <div class="feat-row">
+        <div class="feat-num">03</div>
+        <div class="feat-name">
+          DEAD_LETTER_QUEUE
+          <span class="feat-sub">14 failure categories</span>
+        </div>
+        <div class="feat-desc">Failed events captured and classified into 14 categories: TIMEOUT, NETWORK_ERROR, AUTH_FAILURE, RATE_LIMITING, and more. 0–100 health score per destination. Grouped into incidents with recommended recovery actions.</div>
+      </div>
 
-<div class="modal-overlay" id="modal-new-project">
-  <div class="modal">
-    <div class="modal-header"><div class="modal-title">New Project</div><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-new-project')" style="padding:4px 8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
-    <div class="modal-body">
-      <div class="input-group"><label class="input-label">Project Name</label><input class="input" id="new-project-name" placeholder="My App"></div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="closeModal('modal-new-project')">Cancel</button>
-      <button class="btn btn-primary" onclick="createProject()">Create</button>
+      <div class="feat-row">
+        <div class="feat-num">04</div>
+        <div class="feat-name">
+          CIRCUIT_BREAKER
+          <span class="feat-sub">per destination</span>
+        </div>
+        <div class="feat-desc">Per-destination state machine: OPEN / HALF-OPEN / CLOSED. Broken endpoints suspend automatically — no thundering herd against a degraded service. Auto-recovery when the destination comes back online.</div>
+      </div>
+
+      <div class="feat-row">
+        <div class="feat-num">05</div>
+        <div class="feat-name">
+          BULK_REPLAY
+          <span class="feat-sub">rate-limited recovery</span>
+        </div>
+        <div class="feat-desc">Re-deliver any event or time window. Rate-limited to protect downstream services during recovery. Individual events replayable from the webhook detail view. Full tamper-evident audit trail of every action.</div>
+      </div>
+
+      <div class="feat-row">
+        <div class="feat-num">06</div>
+        <div class="feat-name">
+          FAN_OUT
+          <span class="feat-sub">HMAC signing + multi-tenant</span>
+        </div>
+        <div class="feat-desc">Single event to multiple destinations from one ingest. Standard Webhooks HMAC signing built in. Multi-tenant: projects, team roles, per-project API keys. One self-hosted deployment serves multiple teams.</div>
+      </div>
+
     </div>
   </div>
-</div>
+</section>
 
-<div class="modal-overlay" id="modal-dest">
-  <div class="modal" style="max-width:680px">
-    <div class="modal-header"><div class="modal-title" id="dest-modal-title">New Destination</div><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-dest')" style="padding:4px 8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
-    <div class="modal-body">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-        <div class="input-group" style="grid-column:1/-1"><label class="input-label">Name *</label><input class="input" id="dest-name" placeholder="My App Webhook"></div>
-        <div class="input-group" style="grid-column:1/-1"><label class="input-label">URL *</label><input class="input" id="dest-url" placeholder="https://myapp.com/webhooks"></div>
-        <div class="input-group"><label class="input-label">Max Retries</label><input class="input" type="number" id="dest-max-retries" value="5"></div>
-        <div class="input-group"><label class="input-label">Backoff Base (seconds)</label><input class="input" type="number" id="dest-backoff" value="30"></div>
-        <div class="input-group" style="grid-column:1/-1"><label class="input-label">Filter Expression</label><input class="input" id="dest-filter" placeholder="event.type == 'payment.succeeded'"></div>
-        <div class="input-group" style="grid-column:1/-1"><label class="input-label">Ordering Key Field (dot-path)</label><input class="input" id="dest-ordering-key" placeholder="data.customer_id"></div>
-        <div class="input-group" style="grid-column:1/-1"><label class="input-label">Webhook Secret (Standard Webhooks signing)</label><input class="input" id="dest-secret" placeholder="whsec_… or leave blank"></div>
-        <div class="input-group" style="grid-column:1/-1">
-          <label class="input-label">Transform Type</label>
-          <select class="select" id="dest-transform-type" onchange="toggleTransformEditor()">
-            <option value="none">None — deliver payload as-is</option>
-            <option value="json_map">JSON Field Map — rename / pick fields</option>
-            <option value="javascript">JavaScript — full transform function</option>
-          </select>
+<!-- ═══ HOW IT WORKS ═══ -->
+<section class="section hiw-bg" id="how-it-works">
+  <div class="container">
+    <div style="max-width:600px">
+      <div class="eyebrow">architecture</div>
+      <h2>Instant accept. Reliable deliver.</h2>
+      <p class="section-sub">Relora sits between your event sources and your endpoints. Returns 200 immediately — delivery, retries, and failure handling happen asynchronously.</p>
+    </div>
+
+    <div class="hiw-steps">
+      <div class="hiw-step">
+        <div class="hiw-num">01 // RECEIVE</div>
+        <div class="hiw-title">Instant Accept</div>
+        <div class="hiw-desc">Stripe, GitHub, Shopify, or your own app POSTs to Relora. Returns <code>200 OK</code> immediately and persists the event to Postgres. Your sender is never blocked waiting for your application.</div>
+      </div>
+
+      <div class="hiw-arrow-cell">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1C2A3A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </div>
+
+      <div class="hiw-step">
+        <div class="hiw-num">02 // RELAY</div>
+        <div class="hiw-title">Async Retry</div>
+        <div class="hiw-desc">Background workers deliver events to your destinations. On failure, exponential backoff kicks in. Circuit breakers protect degraded endpoints from thundering-herd. Every attempt is logged.</div>
+      </div>
+
+      <div class="hiw-arrow-cell">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1C2A3A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </div>
+
+      <div class="hiw-step">
+        <div class="hiw-num">03 // RECOVER</div>
+        <div class="hiw-title">Full Visibility</div>
+        <div class="hiw-desc">Every attempt logged with status code and latency. Dashboard shows DLQ depth, circuit states, and delivery trends. Replay any time window in one click.</div>
+      </div>
+    </div>
+
+    <div class="fail-strip">
+      <span class="fail-label">on failure</span>
+      <span class="fp-item">delivery fails</span><span class="fp-sep"> ──▶ </span>
+      <span class="fp-item">exponential retry</span><span class="fp-sep"> ──▶ </span>
+      <span class="fp-item">dead letter queue</span><span class="fp-sep"> ──▶ </span>
+      <span class="fp-item">classify + alert</span><span class="fp-sep"> ──▶ </span>
+      <span class="fp-final">replay when ready ✓</span>
+    </div>
+
+  </div>
+</section>
+
+<!-- ═══ CODE ═══ -->
+<section class="section">
+  <div class="container">
+    <div class="code-grid">
+      <div>
+        <div class="eyebrow">integration</div>
+        <h2>One endpoint.<br>Instant 200.</h2>
+        <p class="section-sub">Point your event source at Relora instead of your app. Delivery happens in the background — your sender is never blocked waiting for your application.</p>
+        <div class="check-list">
+          <div class="check-row"><span class="check-mark">✓</span>Works with Stripe, GitHub, Shopify, or any HTTP source</div>
+          <div class="check-row"><span class="check-mark">✓</span>Python + JavaScript SDKs included</div>
+          <div class="check-row"><span class="check-mark">✓</span>Standard Webhooks HMAC signing built in</div>
+          <div class="check-row"><span class="check-mark">✓</span>Fan-out to multiple destinations from a single event</div>
         </div>
-        <div id="dest-transform-json-wrap" style="display:none;grid-column:1/-1">
-          <div class="input-group">
-            <label class="input-label">Field Map JSON <span style="color:var(--text3);font-weight:400">({"output_field": "source.path"})</span></label>
-            <textarea class="textarea code-editor" id="dest-transform-map" rows="5" placeholder='{"order_id": "data.object.id", "amount": "data.object.amount"}'></textarea>
-          </div>
+      </div>
+
+      <div class="code-block">
+        <div class="code-bar">
+          <div class="code-dot" style="background:#1C2A3A"></div>
+          <div class="code-dot" style="background:#1C2A3A"></div>
+          <div class="code-dot" style="background:var(--green)"></div>
+          <span class="code-filename">ingest.sh</span>
         </div>
-        <div id="dest-transform-js-wrap" style="display:none;grid-column:1/-1">
-          <div class="input-group">
-            <label class="input-label">JavaScript Transform</label>
-            <textarea class="textarea code-editor" id="dest-transform-code" rows="8" placeholder="return { order_id: payload.data.object.id, amount: payload.data.object.amount };"></textarea>
-          </div>
-          <div style="font-size:12px;color:var(--warn);margin-top:-4px">Requires Deno in the worker container.</div>
+        <div class="code-body">
+<pre><span class="c"># 1. Create a destination</span>
+curl -X POST .../api/v1/destinations \
+  -H <span class="s">"X-Relora-API-Key: hk_live_..."</span> \
+  -d <span class="s">'{"name":"Prod","url":"https://api.you.com/hooks"}'</span>
+
+<span class="c"># 2. Send events from anywhere</span>
+curl -X POST .../api/v1/ingest \
+  -H <span class="s">"X-Relora-API-Key: hk_live_..."</span> \
+  -d <span class="s">'{"event":"order.paid","id":"ord_123"}'</span>
+
+<span class="ok">{"success": true, "webhook_ids": ["abc-456"]}</span>
+<span class="c"># ↑ instant. delivery is async, with retries.</span></pre>
         </div>
       </div>
     </div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="closeModal('modal-dest')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveDestination()">Save Destination</button>
+  </div>
+</section>
+
+<!-- ═══ STATS ═══ -->
+<section class="section-sm" style="border-top:1px solid #1C2A3A;border-bottom:1px solid #1C2A3A;background:var(--surface)">
+  <div class="container">
+    <div>
+      <div class="eyebrow">built for reliability</div>
+      <h2>Everything you need, nothing you don't.</h2>
+      <p class="section-sub">Open source, self-hosted, and production-ready out of the box.</p>
     </div>
-  </div>
-</div>
-
-<div class="modal-overlay" id="modal-dest-sla">
-  <div class="modal" style="max-width:560px">
-    <div class="modal-header"><div class="modal-title" id="sla-modal-title">Delivery SLA</div><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-dest-sla')" style="padding:4px 8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
-    <div class="modal-body" id="sla-modal-body"><div style="color:var(--text3);text-align:center;padding:32px">Loading…</div></div>
-  </div>
-</div>
-
-<div class="modal-overlay" id="modal-alert">
-  <div class="modal">
-    <div class="modal-header"><div class="modal-title">New Alert Channel</div><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-alert')" style="padding:4px 8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
-    <div class="modal-body">
-      <div class="input-group"><label class="input-label">Name</label><input class="input" id="alert-name" placeholder="#ops-alerts"></div>
-      <div class="input-group">
-        <label class="input-label">Channel Type</label>
-        <select class="select" id="alert-type" onchange="toggleAlertFields()">
-          <option value="slack">Slack</option>
-          <option value="email">Email (SMTP)</option>
-        </select>
+    <div class="stats-grid">
+      <div class="stat-cell">
+        <div class="stat-num">OSS</div>
+        <div class="stat-label">MIT licensed</div>
       </div>
-      <div id="alert-slack-fields">
-        <div class="input-group"><label class="input-label">Slack Webhook URL</label><input class="input" id="alert-slack-url" placeholder="https://hooks.slack.com/services/…"></div>
+      <div class="stat-cell">
+        <div class="stat-num">~5 min</div>
+        <div class="stat-label">docker compose up</div>
       </div>
-      <div id="alert-email-fields" style="display:none">
-        <div class="input-group"><label class="input-label">SMTP Host</label><input class="input" id="alert-smtp-host" placeholder="smtp.gmail.com"></div>
-        <div class="input-group"><label class="input-label">SMTP Port</label><input class="input" type="number" id="alert-smtp-port" value="587"></div>
-        <div class="input-group"><label class="input-label">Username</label><input class="input" id="alert-smtp-user"></div>
-        <div class="input-group"><label class="input-label">Password</label><input class="input" type="password" id="alert-smtp-pass"></div>
-        <div class="input-group"><label class="input-label">From</label><input class="input" id="alert-smtp-from"></div>
-        <div class="input-group"><label class="input-label">To</label><input class="input" id="alert-smtp-to"></div>
+      <div class="stat-cell">
+        <div class="stat-num">72 rps</div>
+        <div class="stat-label">sustained throughput</div>
+      </div>
+      <div class="stat-cell">
+        <div class="stat-num">525ms</div>
+        <div class="stat-label">p95 delivery latency</div>
       </div>
     </div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="closeModal('modal-alert')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveAlert()">Save</button>
+  </div>
+</section>
+
+<!-- ═══ FAQ ═══ -->
+<section class="section" id="faq">
+  <div class="container">
+    <div style="max-width:720px">
+      <div class="eyebrow">faq</div>
+      <h2>Common questions.</h2>
+    </div>
+    <div class="faq-list">
+
+      <details open>
+        <summary>What is a webhook? <span class="faq-icon">+</span></summary>
+        <p class="faq-answer">A webhook is an automatic HTTP notification sent by one service to another when something happens. Stripe sends one when a payment succeeds. GitHub sends one when code is pushed. Your app receives these and reacts — updating a database, triggering a build, sending an email.</p>
+      </details>
+
+      <details>
+        <summary>Why not send webhooks directly to my app? <span class="faq-icon">+</span></summary>
+        <p class="faq-answer">Your server can be temporarily down, slow to respond, or rate-limited. Most webhook senders give up quickly and don't retry reliably. Without a relay layer, those events are lost forever. Relora accepts every event immediately (always 200), then guarantees delivery through retries, queuing, and dead letter capture — so your application is never the weak link.</p>
+      </details>
+
+      <details>
+        <summary>What happens when delivery fails? <span class="faq-icon">+</span></summary>
+        <p class="faq-answer">Relora retries with exponential backoff: 30 seconds, then 1 min, 2 min, and so on — respecting <code>Retry-After</code> headers when present. Every attempt is logged with status code, response body, and latency. After all retries are exhausted the event moves to the Dead Letter Queue, where it is classified and held for replay.</p>
+      </details>
+
+      <details>
+        <summary>How does replay work? <span class="faq-icon">+</span></summary>
+        <p class="faq-answer">In the dashboard go to Bulk Replay, pick a time window and destination, and start the job. Relora re-queues all events from that window through the full delivery pipeline at a rate you control — so a recovering downstream isn't overwhelmed. Individual events can also be replayed directly from the webhook detail view.</p>
+      </details>
+
+      <details>
+        <summary>What reliability guarantees exist? <span class="faq-icon">+</span></summary>
+        <p class="faq-answer">FIFO delivery per ordering key using <code>SELECT FOR UPDATE SKIP LOCKED</code> — no events are lost or duplicated under concurrent workers. Circuit breakers prevent thundering-herd on degraded endpoints. The DLQ captures every permanently-failed event with a 0–100 health score and automatic failure classification. Postgres is the single source of truth; no external message broker required.</p>
+      </details>
+
+      <details>
+        <summary>At-least-once or exactly-once delivery? <span class="faq-icon">+</span></summary>
+        <p class="faq-answer">At-least-once. Under normal operation each event is delivered exactly once. Under retries, a destination may receive the same event more than once. To achieve exactly-once semantics, send an idempotency key with each event — Relora deduplicates events with the same key before delivery.</p>
+      </details>
+
+      <details>
+        <summary>How does the Dead Letter Queue work? <span class="faq-icon">+</span></summary>
+        <p class="faq-answer">When an event exhausts all retries it moves to the DLQ. Relora classifies the failure into one of 14 categories (AUTHENTICATION, NETWORK, TIMEOUT, SERVER_ERROR, RATE_LIMITING…), groups related failures into incidents, and computes a 0–100 health score. The DLQ Intelligence dashboard shows failure breakdown, growth trend, top failing destinations, and recommended actions.</p>
+      </details>
+
     </div>
   </div>
-</div>
+</section>
 
-<div class="modal-overlay" id="modal-invite">
-  <div class="modal">
-    <div class="modal-header"><div class="modal-title">Invite Team Member</div><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-invite')" style="padding:4px 8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
-    <div class="modal-body">
-      <div class="input-group"><label class="input-label">Email</label><input class="input" id="invite-email" placeholder="colleague@company.com"></div>
-      <div class="input-group">
-        <label class="input-label">Role</label>
-        <select class="select" id="invite-role">
-          <option value="viewer">Viewer</option>
-          <option value="admin">Admin</option>
-          <option value="owner">Owner</option>
-        </select>
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="closeModal('modal-invite')">Cancel</button>
-      <button class="btn btn-primary" onclick="inviteMember()">Send Invite</button>
-    </div>
+<!-- ═══ CTA ═══ -->
+<section class="cta-band">
+  <div class="eyebrow" style="justify-content:center;margin-bottom:16px">ready to ship</div>
+  <h2>Stop losing webhooks.</h2>
+  <p class="cta-sub">
+    Deploy in minutes. No external dependencies beyond Postgres.<br>
+    Full source code. Self-hosted forever.
+  </p>
+  <div class="cta-actions">
+    <a class="btn-primary" href="/register.html">
+      CREATE ACCOUNT
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+    </a>
+    <a class="btn-outline" href="/api/docs" target="_blank" rel="noopener">view api docs</a>
   </div>
-</div>
+</section>
 
-<div class="modal-overlay" id="modal-event-type">
-  <div class="modal">
-    <div class="modal-header"><div class="modal-title">New Event Type</div><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-event-type')" style="padding:4px 8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
-    <div class="modal-body">
-      <div class="input-group"><label class="input-label">Name *</label><input class="input" id="et-name" placeholder="payment.succeeded"></div>
-      <div class="input-group"><label class="input-label">Description</label><input class="input" id="et-desc" placeholder="Fired when a payment succeeds"></div>
-      <div class="input-group"><label class="input-label">Version</label><input class="input" id="et-version" value="1"></div>
-      <div class="input-group"><label class="input-label">Example Payload (JSON)</label><textarea class="textarea" id="et-example" placeholder='{"event":"payment.succeeded"}'></textarea></div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="closeModal('modal-event-type')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveEventType()">Save</button>
-    </div>
+<!-- ═══ FOOTER ═══ -->
+<footer>
+  <div class="footer-logo">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/>
+    </svg>
+    Relora
   </div>
-</div>
-
-<!-- Event Journey Modal -->
-<div class="modal-overlay" id="journey-modal" onclick="if(event.target===this)this.style.display='none'">
-  <div class="modal" style="max-width:720px">
-    <div class="modal-header">
-      <div class="modal-title">Event Journey</div>
-      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('journey-modal').style.display='none'" style="padding:4px 8px">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
-    </div>
-    <div class="modal-body" id="journey-body" style="max-height:60vh;overflow-y:auto"></div>
+  <div class="footer-links">
+    <a class="footer-link" href="/api/docs" target="_blank">/api/docs</a>
+    <a class="footer-link" href="/api/redoc" target="_blank">/api/redoc</a>
+    <a class="footer-link" href="/login.html">/sign-in</a>
+    <a class="footer-link" href="/register.html">/get-started</a>
   </div>
-</div>
+</footer>
 
-<script src="app.js"></script>
 </body>
 </html>

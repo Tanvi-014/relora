@@ -26,6 +26,22 @@ from app.routers.auth import EXCLUDED_INGEST_HEADERS
 
 logger = logging.getLogger("relora.api")
 
+# Strong references prevent GC from collecting tasks before they complete.
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _fire_and_forget(coro) -> asyncio.Task:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    task.add_done_callback(_log_background_task_exception)
+    return task
+
+
+def _log_background_task_exception(task: asyncio.Task) -> None:
+    if not task.cancelled() and (exc := task.exception()) is not None:
+        logger.error("Background task %r raised an unhandled exception", task.get_name(), exc_info=exc)
+
 
 async def _get_project_by_api_key(db: AsyncSession, api_key: str) -> Project:
     result = await db.execute(select(Project).where(Project.api_key == api_key))
@@ -106,7 +122,12 @@ async def ingest_webhook(
     destination_urls = [validate_destination_url(d) for d in destination_candidates]
 
     raw_body = await request.body()
-    verify_webhook_signature(signature_provider, request, raw_body)
+    ingest_secret: Optional[str] = None
+    if signature_provider:
+        _proj = await _get_project_by_api_key(db, tenant_id)
+        _secrets = getattr(_proj, "source_secrets", None) or {}
+        ingest_secret = _secrets.get(signature_provider.lower())
+    verify_webhook_signature(signature_provider, request, raw_body, secret=ingest_secret)
 
     try:
         payload = json.loads(raw_body.decode("utf-8"))
@@ -146,7 +167,7 @@ async def ingest_webhook(
             or event_type_name
             or "unknown"
         )
-        _asyncio.create_task(_check_drift(db, tenant_id, source_key, payload))
+        _fire_and_forget(_check_drift(db, tenant_id, source_key, payload))
 
     # Resolve ordering_key from payload field if it looks like a path
     if ordering_key and isinstance(payload, dict) and "." in ordering_key:
@@ -364,7 +385,7 @@ async def replay_time_window(
     await db.commit()
     await db.refresh(job)
 
-    asyncio.create_task(_execute_replay_job(str(job.id), tenant_id, from_time, to_time, dest_id, rate))
+    _fire_and_forget(_execute_replay_job(str(job.id), tenant_id, from_time, to_time, dest_id, rate))
 
     return {
         "job_id": str(job.id),
@@ -423,6 +444,23 @@ async def _execute_replay_job(job_id: str, tenant_id: str, from_time, to_time, d
                 {"err": str(exc), "id": job_id},
             )
             await db.commit()
+
+
+@router.get("/api/v1/replay-jobs")
+async def list_replay_jobs(
+    tenant_id: str = Depends(get_tenant_from_auth),
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(20, le=100),
+):
+    project = await _get_project_by_api_key(db, tenant_id)
+    result = await db.execute(
+        select(ReplayJob)
+        .where(ReplayJob.project_id == project.id)
+        .order_by(ReplayJob.created_at.desc())
+        .limit(limit)
+    )
+    jobs = result.scalars().all()
+    return [j.to_dict() for j in jobs]
 
 
 @router.get("/api/v1/replay-jobs/{job_id}")

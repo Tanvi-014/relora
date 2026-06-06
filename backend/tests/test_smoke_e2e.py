@@ -12,12 +12,12 @@ Tests the happy path through:
   8. Verify replay also completes
 
 Run with:
-  HERMES_TEST_BASE_URL=http://localhost:8000 \
-  HERMES_TEST_DOWNSTREAM_OK=http://localhost:9000/ok \
+  RELORA_TEST_BASE_URL=http://localhost:8000 \
+  RELORA_TEST_DOWNSTREAM_OK=http://localhost:9000/ok \
   pytest tests/test_smoke_e2e.py -v
 
 These tests require a running API server and delivery worker.
-They are skipped automatically when HERMES_TEST_BASE_URL is not set.
+They are skipped automatically when RELORA_TEST_BASE_URL is not set.
 """
 from __future__ import annotations
 
@@ -28,12 +28,12 @@ import uuid
 import httpx
 import pytest
 
-BASE_URL       = os.getenv("HERMES_TEST_BASE_URL", "")
-DOWNSTREAM_OK  = os.getenv("HERMES_TEST_DOWNSTREAM_OK", "http://localhost:9000/ok")
+BASE_URL       = os.getenv("RELORA_TEST_BASE_URL", "")
+DOWNSTREAM_OK  = os.getenv("RELORA_TEST_DOWNSTREAM_OK", "http://localhost:9000/ok")
 
 pytestmark = pytest.mark.skipif(
     not BASE_URL,
-    reason="HERMES_TEST_BASE_URL not set — skipping E2E smoke tests",
+    reason="RELORA_TEST_BASE_URL not set — skipping E2E smoke tests",
 )
 
 
@@ -155,20 +155,18 @@ def test_05_webhook_delivered():
 # ── Step 6: Replay the webhook ────────────────────────────────────────────────
 
 def test_06_replay_webhook():
+    # POST /api/v1/webhooks/{id}/replay resets the same webhook to pending.
+    # It does NOT create a new webhook_id.
     r = httpx.post(
-        f"{BASE_URL}/api/v1/dlq/{_state['webhook_id']}/replay",
+        f"{BASE_URL}/api/v1/webhooks/{_state['webhook_id']}/replay",
         headers=_project_headers(),
         timeout=10,
     )
     assert r.status_code == 200, f"Replay failed: {r.text}"
     body = r.json()
-    assert "webhook_id" in body or "id" in body or "replayed" in str(body).lower()
-    # New webhook_id may be in body["webhook_id"] or body["id"]
-    new_id = body.get("webhook_id") or body.get("id")
-    if new_id and new_id != _state["webhook_id"]:
-        _state["replay_webhook_id"] = new_id
-    else:
-        _state["replay_webhook_id"] = None
+    assert body.get("success") is True, f"Unexpected replay response: {body}"
+    # Replay resets the original webhook — track the same ID for step 7.
+    _state["replay_webhook_id"] = _state["webhook_id"]
 
 
 # ── Step 7: Verify replay also completes ─────────────────────────────────────

@@ -17,7 +17,7 @@ jobs:
         image: postgres:16
         env:
           POSTGRES_USER: relora
-          POSTGRES_PASSWORD: hermesdev
+          POSTGRES_PASSWORD: reloradev
           POSTGRES_DB: relora
         ports:
           - 5432:5432
@@ -28,13 +28,13 @@ jobs:
           --health-retries 10
 
     env:
-      DATABASE_URL: postgresql+asyncpg://relora:hermesdev@localhost:5432/relora
-      SYNC_DATABASE_URL: postgresql://relora:hermesdev@localhost:5432/relora
+      DATABASE_URL: postgresql+asyncpg://relora:reloradev@localhost:5432/relora
+      SYNC_DATABASE_URL: postgresql://relora:reloradev@localhost:5432/relora
       ENVIRONMENT: development
       AUTO_CREATE_TABLES: "true"
       ALLOW_PRIVATE_DESTINATIONS: "true"
       JWT_SECRET: ci-test-secret-not-for-production
-      PYTHONPATH: /home/runner/work/Relora/Relora/backend
+      PYTHONPATH: ${{ github.workspace }}/backend
 
     steps:
       - name: Checkout
@@ -49,22 +49,32 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: Run unit tests
-        run: python -m pytest tests/test_retry_strategy.py tests/test_standard_webhooks.py tests/test_routing.py tests/test_simulator.py tests/test_circuit_breaker.py tests/test_security.py tests/test_alerts.py tests/test_worker.py tests/test_email.py tests/test_password_reset.py -v
-
-      - name: Run migrations
-        run: alembic upgrade head
-
-      - name: Start Relora API (background)
         run: |
-          uvicorn app.api_main:app --host 0.0.0.0 --port 8000 &
-          sleep 5
-        env:
-          AUTO_CREATE_TABLES: "false"
+          python -m pytest \
+            tests/test_retry_strategy.py \
+            tests/test_standard_webhooks.py \
+            tests/test_routing.py \
+            tests/test_simulator.py \
+            tests/test_circuit_breaker.py \
+            tests/test_security.py \
+            tests/test_alerts.py \
+            tests/test_worker.py \
+            tests/test_email.py \
+            tests/test_password_reset.py \
+            -v
 
       - name: Start fake downstream (background)
         run: |
           uvicorn scripts.fake_downstream:app --host 0.0.0.0 --port 9000 &
-          sleep 2
+          for i in $(seq 1 10); do curl -sf http://localhost:9000/health && break || sleep 1; done
+
+      # AUTO_CREATE_TABLES=true (from job env) makes the API call create_all() on startup,
+      # building the full schema from models on the fresh CI Postgres instance.
+      # This is intentional: committed migrations may lag behind model changes locally.
+      - name: Start Relora API (background)
+        run: |
+          uvicorn app.api_main:app --host 0.0.0.0 --port 8000 &
+          for i in $(seq 1 30); do curl -sf http://localhost:8000/health && break || sleep 1; done
 
       - name: Start delivery worker (background)
         run: |
@@ -77,12 +87,12 @@ jobs:
       - name: Run integration tests
         run: python -m pytest tests/test_api_integration.py -v
         env:
-          HERMES_TEST_BASE_URL: http://localhost:8000
-          HERMES_TEST_DOWNSTREAM_OK: http://localhost:9000/ok
-          HERMES_TEST_DOWNSTREAM_FAIL: http://localhost:9000/fail
+          RELORA_TEST_BASE_URL: http://localhost:8000
+          RELORA_TEST_DOWNSTREAM_OK: http://localhost:9000/ok
+          RELORA_TEST_DOWNSTREAM_FAIL: http://localhost:9000/fail
 
       - name: Run E2E smoke tests
         run: python -m pytest tests/test_smoke_e2e.py -v
         env:
-          HERMES_TEST_BASE_URL: http://localhost:8000
-          HERMES_TEST_DOWNSTREAM_OK: http://localhost:9000/ok
+          RELORA_TEST_BASE_URL: http://localhost:8000
+          RELORA_TEST_DOWNSTREAM_OK: http://localhost:9000/ok

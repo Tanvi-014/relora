@@ -4,8 +4,8 @@
 
 ---
 
-## Production Readiness: 93%
-**Last assessed: 2026-06-05**
+## Production Readiness: 94%
+**Last assessed: 2026-06-07**
 
 | Area | Status | Notes |
 |------|--------|-------|
@@ -61,7 +61,7 @@
 | **Password reset — tests** | 22 tests in test_password_reset.py covering all token states, email dispatch, both auth routes |
 | **Prometheus alert rules** | monitoring/prometheus/alerts.yml: 8 rules covering DLQ depth (warn >100 / crit >1000), error rate (<90% / <75%), circuit breaker open, worker stall (>10 min), pending queue growth, DLQ health score |
 | **Email verification safety gate** | api_main.py: startup blocks if EMAIL_VERIFICATION_REQUIRED=true and RESEND_API_KEY=""; prevents locking users out with no recovery path |
-| **E2E smoke test** | test_smoke_e2e.py: 8-step test (register → project → destination → ingest → wait for delivery → replay → wait for replay → health check); auto-skips if HERMES_TEST_BASE_URL not set |
+| **E2E smoke test** | test_smoke_e2e.py: 8-step test (register → project → destination → ingest → wait for delivery → replay → wait for replay → health check); auto-skips if RELORA_TEST_BASE_URL not set |
 | **Backup verification script** | scripts/verify-backup.sh: finds newest backup, restores to throw-away DB, checks all 4 core tables exist, drops temp DB |
 | **nginx domain auto-substitution** | scripts/init-certs.sh now calls `sed -i` inline after cert issuance; supports both GNU and BSD sed; no manual step remaining |
 | **CI updated** | test_password_reset.py added to unit tests; worker started in CI before E2E tests; E2E smoke test added as separate step |
@@ -172,3 +172,4 @@ Sender (Stripe, GitHub, Twilio...)
 | 2026-06-05 | 16 | Backup verification: scripts/verify-backup.sh (restore to temp DB, table sanity check) |
 | 2026-06-05 | 16 | nginx domain automation: init-certs.sh auto-patches nginx.prod.conf inline |
 | 2026-06-05 | 16 | CI: test_password_reset.py + worker start + E2E smoke test added |
+| 2026-06-07 | 17 | Bug fix: `asyncio.create_task()` in webhooks.py had no error handler — failed background tasks (schema drift check, replay job launch) were silently dropped. Added `_fire_and_forget` helper with strong-reference set (prevents GC) and done callback that logs exceptions via `logger.error` |

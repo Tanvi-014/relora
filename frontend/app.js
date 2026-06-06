@@ -17,6 +17,26 @@ let destinations = [];
 let ws = null;
 let wsReconnectTimer = null;
 let searchTimer = null;
+const feedEvents = [];
+const FEED_MAX = 50;
+let _pendingQueue = 0;
+let _editingDestId = null;
+
+// Mission control state — shared between loadDashboard and loadSystemStatus
+let _mcWorkerOk = true;
+let _mcPending = 0;
+let _mcKpis = null;
+let _mcSystemStatus = 'healthy';
+
+// DLQ global state — updated by background poll
+let _dlqDepth = 0;
+let _dlqPollTimer = null;
+const _rfIcons = {
+  ok:   `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
+  err:  `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+  warn: `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`,
+  info: `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`,
+};
 
 // ---------------------------------------------------------------------------
 // Boot
@@ -33,6 +53,16 @@ async function boot() {
     await loadProjects();
     connectWS();
     navTo('overview');
+    // Welcome toast for new signups
+    if (new URLSearchParams(window.location.search).get('welcome') === '1') {
+      history.replaceState({}, '', '/app.html');
+      setTimeout(() => toast('Welcome to Relora! Follow the setup steps above to go live.', 'success'), 800);
+    }
+    // Tick the banner so "last delivery Xs ago" stays accurate
+    setInterval(_renderMCBanner, 15000);
+    // Background DLQ poll — runs on every page, keeps indicators current
+    await _pollDLQState();
+    _dlqPollTimer = setInterval(_pollDLQState, 30000);
   } catch {
     // Not logged in → redirect
     window.location.href = '/login.html';
@@ -40,12 +70,49 @@ async function boot() {
 }
 
 // ---------------------------------------------------------------------------
+// DLQ background poll + indicators
+// ---------------------------------------------------------------------------
+async function _pollDLQState() {
+  try {
+    const data = await apiFetch('/dlq/health');
+    const depth = data?.components?.dlq_size?.value ?? 0;
+    const prevDepth = _dlqDepth;
+    _dlqDepth = depth;
+    _updateDLQIndicators(depth);
+    // Refresh notifications if DLQ state changed
+    if (depth !== prevDepth) loadNotifications();
+  } catch {}
+}
+
+function _updateDLQIndicators(depth) {
+  // Tab title — prepend warning ping when DLQ is non-empty
+  document.title = depth > 0 ? `[⚠ ${depth}] Relora` : 'Relora';
+
+  // Nav badge on the DLQ nav item
+  const badge = document.getElementById('dlq-nav-badge');
+  const navItem = document.querySelector('[data-page="dlq-intelligence"]');
+  if (badge) {
+    badge.textContent = depth > 9 ? '9+' : depth;
+    badge.style.display = depth > 0 ? '' : 'none';
+  }
+  if (navItem) navItem.classList.toggle('nav-item--dlq-alert', depth > 0);
+
+  // Page-pulse DLQ counter color
+  const ppDlq = document.getElementById('pp-dlq');
+  if (ppDlq) {
+    ppDlq.textContent = depth;
+    ppDlq.className = depth === 0 ? '' : depth < 10 ? 'pp-warn' : 'pp-crit';
+  }
+}
+
+// ---------------------------------------------------------------------------
 // API fetch helper (uses httpOnly cookie automatically)
 // ---------------------------------------------------------------------------
 async function apiFetch(path, opts = {}) {
+  const projectHeader = currentProject?.id ? { 'X-Project-Id': currentProject.id } : {};
   const res = await fetch(API + path, {
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+    headers: { 'Content-Type': 'application/json', ...projectHeader, ...(opts.headers || {}) },
     ...opts,
   });
   if (res.status === 401) { window.location.href = '/login.html'; throw new Error('401'); }
@@ -72,6 +139,7 @@ function renderUserMenu() {
     e.stopPropagation();
     document.getElementById('user-dropdown').classList.toggle('open');
     document.getElementById('ps-dropdown').classList.remove('open');
+    document.getElementById('notif-panel')?.classList.remove('open');
   });
 }
 
@@ -127,9 +195,13 @@ async function afterProjectSwitch() {
     loadDashboard(),
     loadDestinations(),
   ]);
+  loadNotifications();
   document.getElementById('settings-api-key').value = currentProject?.api_key || '';
+  const ingestUrl = `${window.location.origin}/api/v1/ingest`;
   const ingestEl = document.getElementById('settings-ingest-url');
-  if (ingestEl) ingestEl.value = `${window.location.origin}/api/v1/ingest`;
+  if (ingestEl) ingestEl.value = ingestUrl;
+  const destIngestEl = document.getElementById('dest-ingest-url');
+  if (destIngestEl) destIngestEl.value = ingestUrl;
 }
 
 function openNewProjectModal() {
@@ -171,7 +243,20 @@ function connectWS() {
     try {
       const msg = JSON.parse(e.data);
       if (msg.type === 'webhook.updated') {
-        updateWebhookRowLive(msg.data);
+        const d = msg.data;
+        updateWebhookRowLive(d);
+        // Push to activity feed + pulse arch viz
+        const destLabel = _shortUrl(d.destination_url);
+        if (d.status === 'completed') {
+          _pushFeedEvent('ok', 'Delivery succeeded', destLabel, d.updated_at);
+          _arcVizPulse('ok');
+          _pipelineNodeFlash('pipe-node-relay', 'ok');
+          _triggerFirstDeliveryCelebration(d);
+        } else if (d.status === 'failed') {
+          _pushFeedEvent('err', 'Delivery failed', destLabel, d.updated_at);
+          _arcVizPulse('err');
+          _pipelineNodeFlash('pipe-node-dlq', 'err');
+        }
         // Refresh dashboard KPIs if overview is active
         if (document.getElementById('page-overview')?.classList.contains('active')) {
           loadDashboard();
@@ -198,6 +283,10 @@ function setWsDot(state) {
   const txt = document.getElementById('ws-status-text');
   dot.className = 'ws-dot ' + state;
   txt.textContent = state === 'connected' ? 'Live' : state === 'connecting' ? 'Connecting…' : 'Disconnected';
+  const feedLive = document.getElementById('rel-feed-live');
+  if (feedLive) feedLive.className = 'rel-feed-live' + (state === 'connected' ? ' rel-feed-live--on' : '');
+  const livePill = document.getElementById('mc-live-pill');
+  if (livePill) livePill.className = 'mc-live-pill' + (state === 'connected' ? ' live-on' : '');
 }
 
 function updateWebhookRowLive(data) {
@@ -213,9 +302,51 @@ function updateWebhookRowLive(data) {
 }
 
 // ---------------------------------------------------------------------------
+// Pipeline — live flash + auto-refresh
+// ---------------------------------------------------------------------------
+let _pipelineRefreshTimer = null;
+
+function _pipelineNodeFlash(nodeId, type) {
+  const node = document.getElementById(nodeId);
+  if (!node) return;
+  const cls = 'pipe-node--flash-' + type;
+  node.classList.remove('pipe-node--flash-ok', 'pipe-node--flash-err');
+  void node.offsetWidth; // force reflow so animation restarts
+  node.classList.add(cls);
+  setTimeout(() => node.classList.remove(cls), 900);
+}
+
+// ---------------------------------------------------------------------------
 // Navigation
 // ---------------------------------------------------------------------------
+var _auditTab = 'log';
+
+function switchAuditTab(tab) {
+  _auditTab = tab;
+  document.querySelectorAll('[data-audittab]').forEach(t => t.classList.toggle('active', t.dataset.audittab === tab));
+  const logPanel = document.getElementById('audit-tab-log');
+  const tlPanel  = document.getElementById('audit-tab-timeline');
+  if (logPanel) logPanel.style.display = tab === 'log' ? '' : 'none';
+  if (tlPanel)  tlPanel.style.display  = tab === 'timeline' ? '' : 'none';
+  if (tab === 'log')      loadAuditLog();
+  if (tab === 'timeline') loadTimeline();
+}
+
+function refreshAuditTab() {
+  if (_auditTab === 'log') loadAuditLog();
+  else loadTimeline();
+}
+
 function navTo(page) {
+  // Timeline is now inside Audit
+  if (page === 'timeline') { navTo('audit'); switchAuditTab('timeline'); return; }
+
+  // Stop pipeline auto-refresh when leaving that page
+  if (page !== 'pipeline' && _pipelineRefreshTimer) {
+    clearInterval(_pipelineRefreshTimer);
+    _pipelineRefreshTimer = null;
+  }
+
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   const pageEl = document.getElementById('page-' + page);
@@ -223,26 +354,228 @@ function navTo(page) {
   if (pageEl) pageEl.classList.add('active');
   if (navEl) navEl.classList.add('active');
 
+  // Show the system heartbeat strip on all pages except overview (which has the full KPI strip)
+  const pulse = document.getElementById('page-pulse');
+  if (pulse) {
+    if (page === 'overview') {
+      pulse.classList.remove('pp-visible');
+    } else {
+      pulse.classList.add('pp-visible');
+      _updatePagePulse();
+    }
+  }
+
   // Lazy-load page data
   if (page === 'overview') { loadDashboard(); }
   if (page === 'webhooks') loadWebhooks(1);
   if (page === 'destinations') loadDestinations();
   if (page === 'alerts') loadAlerts();
   if (page === 'team') loadTeam();
-  if (page === 'event-types') loadEventTypes();
-  if (page === 'simulate') initSimulator();
   if (page === 'replay') initReplay();
   if (page === 'analytics') loadAnalytics();
-  if (page === 'ai') { /* static UI, no load needed */ }
   if (page === 'dlq-intelligence') { loadDLQIntelligence(); }
   if (page === 'schema-drift') { loadSchemaDrift(); }
+  if (page === 'audit') { switchAuditTab(_auditTab); }
+  if (page === 'settings') { loadSigningSecrets(); }
+  if (page === 'recovery') { loadRecovery(); }
+  if (page === 'insights') { loadInsights(); }
+  if (page === 'pipeline') {
+    loadPipeline();
+    if (!_pipelineRefreshTimer) {
+      _pipelineRefreshTimer = setInterval(loadPipeline, 30000);
+    }
+  }
 }
 
 // Close dropdowns on outside click
 document.addEventListener('click', () => {
   document.getElementById('ps-dropdown').classList.remove('open');
   document.getElementById('user-dropdown').classList.remove('open');
+  document.getElementById('notif-panel')?.classList.remove('open');
+  document.getElementById('notif-btn')?.classList.remove('has-unread-open');
 });
+
+// ⌘K / Ctrl+K focuses the header search
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    e.preventDefault();
+    const inp = document.getElementById('header-search-input');
+    if (inp) { inp.focus(); inp.select(); }
+  }
+});
+
+function _headerSearch(query) {
+  if (!query.trim()) return;
+  navTo('webhooks');
+  setTimeout(() => {
+    const inp = document.getElementById('wh-search');
+    if (inp) {
+      inp.value = query.trim();
+      loadWebhooks(1);
+    }
+    const headerInp = document.getElementById('header-search-input');
+    if (headerInp) headerInp.value = '';
+  }, 50);
+}
+
+// ---------------------------------------------------------------------------
+// Notification center
+// ---------------------------------------------------------------------------
+const _NOTIF_READ_KEY = 'relora_notifs_read';
+
+function _getReadIds() {
+  try { return new Set(JSON.parse(localStorage.getItem(_NOTIF_READ_KEY) || '[]')); } catch { return new Set(); }
+}
+function _markRead(id) {
+  const ids = _getReadIds();
+  ids.add(id);
+  localStorage.setItem(_NOTIF_READ_KEY, JSON.stringify([...ids]));
+}
+function _markAllRead(ids) {
+  localStorage.setItem(_NOTIF_READ_KEY, JSON.stringify(ids));
+}
+
+let _notifItems = [];
+
+async function loadNotifications() {
+  const items = [];
+
+  // ── Onboarding suggestions ────────────────────────────────────────────────
+  if (destinations.length === 0) {
+    items.push({
+      id: 'onboarding-dest',
+      type: 'onboarding',
+      title: 'Add your first destination',
+      desc: 'Configure where Relora should deliver your webhooks.',
+      action: () => openDestModal(),
+    });
+  }
+  if (destinations.length > 0 && destinations.length < 2) {
+    items.push({
+      id: 'onboarding-alerts',
+      type: 'onboarding',
+      title: 'Configure alert thresholds',
+      desc: 'Set failure-rate or latency thresholds to get notified before incidents escalate.',
+      action: () => navTo('settings'),
+    });
+  }
+
+  // ── Weekly Insights report ────────────────────────────────────────────────
+  try {
+    const report = await apiFetch('/insights/reports/current');
+    if (report && report.week_start) {
+      const ws   = new Date(report.week_start);
+      const we   = new Date(report.week_end);
+      const wEnd = new Date(we.getTime() - 86400000);
+      const lbl  = ws.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' – ' +
+        wEnd.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      items.push({
+        id: 'insight-' + report.week_start,
+        type: 'insight',
+        title: 'Weekly Reliability Briefing ready',
+        desc: `${lbl} · Grade ${report.grade} · ${(report.reliability_score ?? 100).toFixed(1)}% reliability`,
+        action: () => navTo('insights'),
+      });
+    }
+  } catch {}
+
+  // ── DLQ alert — surfaced whenever the queue is non-empty ─────────────────
+  if (_dlqDepth > 0) {
+    items.push({
+      id: 'dlq-nonempty',
+      type: 'dlq',
+      title: `${_dlqDepth} event${_dlqDepth !== 1 ? 's' : ''} could not be delivered`,
+      desc: 'These events failed all retry attempts and need your attention. Click to review and replay.',
+      action: () => navTo('dlq-intelligence'),
+    });
+  }
+
+  // ── Active incidents ──────────────────────────────────────────────────────
+  if (_mcKpis && _mcKpis.open_incidents > 0) {
+    const n = _mcKpis.open_incidents;
+    items.push({
+      id: 'incidents-open-' + n,
+      type: 'incident',
+      title: `${n} open incident${n > 1 ? 's' : ''} require attention`,
+      desc: 'Review active incidents and take action before they escalate.',
+      action: () => navTo('dlq-intelligence'),
+    });
+  }
+
+  _notifItems = items;
+  _renderNotifBadge();
+  _renderNotifList();
+}
+
+function _renderNotifBadge() {
+  const readIds  = _getReadIds();
+  const unread   = _notifItems.filter(n => !readIds.has(n.id));
+  const badge    = document.getElementById('notif-badge');
+  const btn      = document.getElementById('notif-btn');
+  if (!badge || !btn) return;
+  if (unread.length > 0) {
+    badge.textContent = unread.length > 9 ? '9+' : unread.length;
+    badge.style.display = '';
+    btn.classList.add('has-unread');
+  } else {
+    badge.style.display = 'none';
+    btn.classList.remove('has-unread');
+  }
+}
+
+function _renderNotifList() {
+  const el = document.getElementById('notif-list');
+  if (!el) return;
+  const readIds = _getReadIds();
+  if (!_notifItems.length) {
+    el.innerHTML = '<div class="notif-empty">All caught up — no notifications.</div>';
+    return;
+  }
+  const iconSvg = {
+    insight: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>`,
+    incident: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`,
+    dlq: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v3l2 2"/></svg>`,
+    onboarding: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>`,
+    product: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/></svg>`,
+  };
+  el.innerHTML = _notifItems.map(item => {
+    const unread = !readIds.has(item.id);
+    return `<div class="notif-item${unread ? ' unread' : ''}" onclick="_notifClick('${item.id}')">
+      ${unread ? '<div class="notif-unread-dot"></div>' : ''}
+      <div class="notif-icon notif-icon-${item.type}">${iconSvg[item.type] || ''}</div>
+      <div class="notif-body">
+        <div class="notif-title">${esc(item.title)}</div>
+        <div class="notif-desc">${esc(item.desc)}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function _notifClick(id) {
+  _markRead(id);
+  _renderNotifBadge();
+  _renderNotifList();
+  const item = _notifItems.find(n => n.id === id);
+  if (item?.action) {
+    document.getElementById('notif-panel')?.classList.remove('open');
+    item.action();
+  }
+}
+
+function markAllNotifsRead() {
+  _markAllRead(_notifItems.map(n => n.id));
+  _renderNotifBadge();
+  _renderNotifList();
+}
+
+function toggleNotifPanel(e) {
+  e.stopPropagation();
+  const panel = document.getElementById('notif-panel');
+  const isOpen = panel.classList.contains('open');
+  document.getElementById('user-dropdown').classList.remove('open');
+  document.getElementById('ps-dropdown').classList.remove('open');
+  panel.classList.toggle('open', !isOpen);
+}
 
 // ---------------------------------------------------------------------------
 // Stats
@@ -273,7 +606,24 @@ async function loadStats() {
 // ---------------------------------------------------------------------------
 async function loadDashboard() {
   try {
-    const d = await apiFetch('/dashboard');
+    const [d] = await Promise.all([
+      apiFetch('/dashboard'),
+      loadSystemStatus(),
+    ]);
+
+    // Store for cross-function access
+    _mcKpis = { ...d.kpis, deliveries_today: d.deliveries_today ?? 0, last_delivery_at: d.last_delivery_at ?? null };
+    _mcSystemStatus = d.system_status;
+
+    // Mission control renderers
+    _renderKPIStrip(d.kpis, d.active_incidents || [], d.recent_failures || []);
+    _renderMCBanner();
+    _renderMCTriage(d.kpis, d.active_incidents || [], d.slo_breaches || [], d.unacked_schema_changes || 0);
+    _renderMCDLQ(d.kpis?.dlq_depth ?? 0);
+    _renderMCDestinations();
+    _syncFeedFromDashboard(d.recent_failures || [], d.active_incidents || [], d.recent_activity || []);
+
+    // Legacy renderers — write to hidden ghost IDs, safe to keep
     _renderHealthBanner(d.system_status);
     _renderKPIs(d.kpis);
     _renderHealthSplit(d.health_split || {});
@@ -282,11 +632,271 @@ async function loadDashboard() {
     _renderIncidents(d.active_incidents || []);
     _renderSparkline(d.sparkline || []);
     _renderRecentFailures(d.recent_failures || []);
-    document.getElementById('health-updated').textContent = 'Updated ' + relTime(new Date().toISOString());
-  } catch (e) {
-    document.getElementById('health-banner-title').textContent = 'Unable to load health data';
-    document.getElementById('health-banner-sub').textContent = e.message;
+    _renderCommandCenter(d.kpis, d.active_incidents || []);
+    _renderWhatChanged(d.kpis, d.active_incidents || []);
+    _renderArchViz(d.kpis);
+    _renderOnboarding();
+    _renderNRA();
+    _updatePagePulse();
+  } catch {}
+}
+
+function _updatePagePulse() {
+  const kpis = _mcKpis || {};
+  const rate = kpis.success_rate_24h;
+  const dlq = kpis.dlq_depth ?? 0;
+  const incidents = kpis.open_incidents ?? 0;
+  const delivered = kpis.deliveries_today ?? 0;
+
+  const rateEl = document.getElementById('pp-rate');
+  const dlqEl  = document.getElementById('pp-dlq');
+  const incEl  = document.getElementById('pp-incidents');
+  const delEl  = document.getElementById('pp-delivered');
+  const dotEl  = document.getElementById('pp-dot');
+
+  if (rateEl) {
+    rateEl.textContent = rate != null ? rate.toFixed(1) + '%' : '—';
+    rateEl.className = rate == null ? '' : rate >= 99 ? 'pp-ok' : rate >= 95 ? 'pp-warn' : 'pp-crit';
   }
+  if (dlqEl) {
+    dlqEl.textContent = dlq;
+    dlqEl.className = dlq === 0 ? '' : dlq < 10 ? 'pp-warn' : 'pp-crit';
+  }
+  if (incEl) {
+    incEl.textContent = incidents;
+    incEl.className = incidents === 0 ? '' : 'pp-warn';
+  }
+  if (delEl) {
+    delEl.textContent = delivered > 0 ? delivered.toLocaleString() : '0';
+  }
+  if (dotEl) {
+    const isCrit = (rate != null && rate < 90) || incidents > 0;
+    const isWarn = dlq > 0 || (rate != null && rate < 99);
+    dotEl.className = 'pp-dot' + (isCrit ? ' pp-crit' : isWarn ? ' pp-warn' : '');
+  }
+}
+
+async function loadSystemStatus() {
+  const row = document.getElementById('sys-status-row');
+  try {
+    const hRes = await fetch('/health/detailed', { credentials: 'include' });
+    const h = hRes.ok ? await hRes.json() : {};
+    const worker = h.checks?.worker || {};
+    const queue  = h.checks?.queue  || {};
+    const pending = queue.depth ?? 0;
+    _pendingQueue = pending;
+    _mcPending = pending;
+    const stuckJobs = worker.stuck_jobs ?? 0;
+    const workerOk = worker.status === 'ok';
+    _mcWorkerOk = workerOk;
+
+    // Update pending KPI card
+    const pendingEl  = document.getElementById('kpi-pending');
+    const pendingCard = document.getElementById('kpi-pending-card');
+    if (pendingEl) {
+      pendingEl.textContent = pending.toLocaleString();
+      pendingEl.className = 'kpi-value ' + (pending === 0 ? 'kpi-good' : pending < 50 ? '' : 'kpi-warn');
+    }
+    if (pendingCard) pendingCard.classList.toggle('kpi-card--warn', pending > 50);
+
+    if (row) row.innerHTML = [
+      _sysPill(workerOk ? 'ok' : 'crit',
+               workerOk ? 'Worker online' : `Worker stalled — ${stuckJobs} stuck job${stuckJobs !== 1 ? 's' : ''}`),
+      _sysPill(pending === 0 ? 'ok' : pending < 50 ? 'warn' : 'crit',
+               `${pending.toLocaleString()} pending`),
+    ].join('');
+
+    _renderMCBanner();
+  } catch {
+    if (row) row.innerHTML = '';
+  }
+}
+
+function _sysPill(cls, label) {
+  return `<span class="sys-status-pill ${cls}">${esc(label)}</span>`;
+}
+
+function _renderOnboarding() {
+  const card = document.getElementById('onboarding-card');
+  if (!card) return;
+  const hasDest = destinations.length > 0;
+  const hasActivity = (_mcKpis?.deliveries_today ?? 0) > 0 || feedEvents.length > 0;
+  _updateSetupStrip(hasDest, hasActivity);
+  if (hasDest && hasActivity) { card.style.display = 'none'; return; }
+  card.style.display = '';
+
+  const mark = (stepEl, numEl, done) => {
+    if (!stepEl || !numEl) return;
+    stepEl.classList.toggle('mc-ob-step--done', done);
+    numEl.textContent = done ? '✓' : numEl.dataset.n;
+  };
+  const s1 = document.getElementById('ob-step-1'), n1 = document.getElementById('ob-num-1');
+  const s2 = document.getElementById('ob-step-2'), n2 = document.getElementById('ob-num-2');
+  const s3 = document.getElementById('ob-step-3'), n3 = document.getElementById('ob-num-3');
+  if (n1) n1.dataset.n = '1';
+  if (n2) n2.dataset.n = '2';
+  if (n3) n3.dataset.n = '3';
+  mark(s1, n1, hasDest);
+  mark(s2, n2, hasDest);
+  mark(s3, n3, hasActivity);
+
+  // Populate curl example with real API key
+  const curlEl = document.getElementById('ob-curl-example');
+  if (curlEl && currentProject?.api_key) {
+    const ingestUrl = `${window.location.origin}/api/v1/ingest`;
+    curlEl.textContent = `curl -X POST ${ingestUrl} \\
+  -H "Content-Type: application/json" \\
+  -H "X-Relora-API-Key: ${currentProject.api_key}" \\
+  -d '{
+    "event_type": "payment.succeeded",
+    "data": { "order_id": "ord_123", "amount": 4999 }
+  }'`;
+  }
+}
+
+function _updateSetupStrip(hasDest, hasActivity) {
+  const strip = document.getElementById('setup-strip');
+  if (!strip) return;
+  if ((hasDest && hasActivity) || localStorage.getItem('relora_setup_dismissed') === '1') {
+    strip.style.display = 'none';
+    return;
+  }
+  strip.style.display = '';
+  const inner = document.getElementById('setup-strip-inner');
+  if (!inner) return;
+  const s = (done, num, label, page) => `
+    <span class="setup-strip-step${done ? ' setup-strip-step--done' : ''}">
+      <span class="setup-strip-num">${done ? '✓' : num}</span>
+      <span class="setup-strip-label">${label}</span>
+      ${!done ? `<button class="setup-strip-cta" onclick="navTo('${page}')">Do it →</button>` : ''}
+    </span>`;
+  inner.innerHTML =
+    `<span style="font-size:10px;font-family:var(--mono);color:var(--accent);letter-spacing:.06em;text-transform:uppercase;flex-shrink:0">Setup</span>` +
+    `<span class="setup-strip-sep">·</span>` +
+    s(hasDest,    '1', 'Add a destination',      'destinations') +
+    `<span class="setup-strip-sep">·</span>` +
+    s(hasDest,    '2', 'Configure your source',  'settings') +
+    `<span class="setup-strip-sep">·</span>` +
+    s(hasActivity,'3', 'Send your first webhook', 'overview');
+}
+
+function _dismissSetupStrip() {
+  localStorage.setItem('relora_setup_dismissed', '1');
+  const strip = document.getElementById('setup-strip');
+  if (strip) strip.style.display = 'none';
+}
+
+// ---------------------------------------------------------------------------
+// Next Recommended Action card
+// ---------------------------------------------------------------------------
+let _alertCount = null;
+
+async function _loadAlertCount() {
+  if (_alertCount !== null) return;
+  try {
+    const alerts = await apiFetch('/alerts');
+    _alertCount = (alerts || []).filter(a => a.enabled).length;
+  } catch { _alertCount = 0; }
+}
+
+async function _renderNRA() {
+  await _loadAlertCount();
+  const card = document.getElementById('nra-card');
+  if (!card) return;
+  // Don't overwrite the celebration card once it's shown
+  if (card.classList.contains('nra-card--celebrate')) return;
+
+  const hasDest     = destinations.length > 0;
+  const hasActivity = (_mcKpis?.deliveries_today ?? 0) > 0 || feedEvents.length > 0;
+  const hasAlerts   = (_alertCount ?? 0) > 0;
+  const insightsSeen = localStorage.getItem('relora_insights_seen') === '1';
+  const body = document.getElementById('nra-body');
+  if (!body) return;
+
+  if (!hasDest) {
+    card.style.display = '';
+    body.innerHTML = `
+      <div class="nra-title">Add your first destination</div>
+      <div class="nra-desc">Tell Relora where to deliver incoming webhooks — your app's API, a staging URL, or a test endpoint.</div>
+      <div class="nra-actions">
+        <button class="btn btn-primary btn-sm" onclick="openDestModal()">Add destination</button>
+      </div>`;
+    return;
+  }
+
+  if (!hasActivity) {
+    card.style.display = '';
+    const ingestUrl = `${window.location.origin}/api/v1/ingest`;
+    const apiKey = currentProject?.api_key || 'YOUR_API_KEY';
+    const cmd = `curl -X POST ${ingestUrl} \\\n  -H "Content-Type: application/json" \\\n  -H "X-Relora-API-Key: ${apiKey}" \\\n  -d '{"event_type":"payment.created","data":{"order_id":"ord_test_1"}}'`;
+    body.innerHTML = `
+      <div class="nra-title">Send your first webhook to verify delivery.</div>
+      <div class="nra-desc">Your destination is ready. Run the test command to confirm the full pipeline is working — the event will appear live below.</div>
+      <div class="nra-actions">
+        <button class="btn btn-primary btn-sm" onclick="_nraCopyCmd(${JSON.stringify(cmd)})">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          Copy test command
+        </button>
+        <button class="btn btn-secondary btn-sm" onclick="navTo('simulator')">Use simulator →</button>
+      </div>`;
+    return;
+  }
+
+  if (!hasAlerts) {
+    card.style.display = '';
+    body.innerHTML = `
+      <div class="nra-title">Configure alerts to get notified when deliveries fail.</div>
+      <div class="nra-desc">Know the moment something breaks — before your customers do. Connect Slack, email, or any webhook endpoint.</div>
+      <div class="nra-actions">
+        <button class="btn btn-primary btn-sm" onclick="navTo('alerts');setTimeout(openAlertModal,100)">Configure alerts</button>
+      </div>`;
+    return;
+  }
+
+  if (!insightsSeen) {
+    card.style.display = '';
+    body.innerHTML = `
+      <div class="nra-title">Explore Insights and reliability reporting.</div>
+      <div class="nra-desc">Weekly reliability grades, delivery trends, and shareable reports — see how your system is really performing over time.</div>
+      <div class="nra-actions">
+        <button class="btn btn-primary btn-sm" onclick="localStorage.setItem('relora_insights_seen','1');navTo('insights')">Open Insights</button>
+        <button class="btn btn-secondary btn-sm" onclick="_dismissNRA()">Not now</button>
+      </div>`;
+    return;
+  }
+
+  card.style.display = 'none';
+}
+
+function _nraCopyCmd(cmd) {
+  navigator.clipboard.writeText(cmd).then(() => toast('Copied to clipboard', 'success'));
+}
+
+function _dismissNRA() {
+  const card = document.getElementById('nra-card');
+  if (card) card.style.display = 'none';
+}
+
+function _triggerFirstDeliveryCelebration(event) {
+  if (localStorage.getItem('relora_first_celebrated') === '1') return;
+  localStorage.setItem('relora_first_celebrated', '1');
+  const card = document.getElementById('nra-card');
+  if (!card) return;
+  card.className = 'nra-card nra-card--celebrate';
+  card.style.display = '';
+  const dest = destinations.find(d => d.id === event.destination_id);
+  const destName = dest?.name || _shortUrl(event.destination_url || '');
+  const eventLabel = event.event_id || 'webhook';
+  document.getElementById('nra-body').innerHTML = `
+    <div class="nra-celebrate-emoji">🎉</div>
+    <div class="nra-title">First webhook delivered</div>
+    <div class="nra-celebrate-event">${esc(eventLabel)}</div>
+    <div class="nra-celebrate-dest">→ ${esc(destName)}</div>
+    <div class="nra-celebrate-latency">Delivered successfully</div>
+    <div class="nra-actions" style="margin-top:14px">
+      <button class="btn btn-primary btn-sm" onclick="navTo('alerts');setTimeout(openAlertModal,100)">Set up alerts →</button>
+      <button class="btn btn-secondary btn-sm" onclick="_dismissNRA()">Dismiss</button>
+    </div>`;
 }
 
 function _renderHealthSplit(split) {
@@ -313,9 +923,9 @@ function _renderSloBreaches(breaches) {
   if (!el) return;
   if (!breaches.length) { el.innerHTML = ''; return; }
   el.innerHTML = `<div class="inline-banner inline-banner--danger">
-    <strong>SLO Breach${breaches.length > 1 ? 'es' : ''}</strong>
+    <strong>Reliability goal${breaches.length > 1 ? 's' : ''} not met</strong>
     ${breaches.map(b =>
-      `<span class="slo-breach-item">${esc(b.destination_name)}: ${b.current_pct.toFixed(1)}% (target ${b.target_pct}%)</span>`
+      `<span class="slo-breach-item">${esc(b.destination_name)}: ${b.current_pct.toFixed(1)}% delivered (goal: ${b.target_pct}%)</span>`
     ).join('')}
   </div>`;
 }
@@ -325,8 +935,7 @@ function _renderSchemaDriftAlert(count) {
   if (!el) return;
   if (!count) { el.innerHTML = ''; return; }
   el.innerHTML = `<div class="inline-banner inline-banner--warn">
-    <strong>${count} unacknowledged schema change${count > 1 ? 's' : ''}</strong> detected.
-    <a href="#" onclick="navigate('schema-drift');return false;">Review changes →</a>
+    <strong>Payload shape changed</strong> — your source started sending different event data (${count} change${count > 1 ? 's' : ''} detected). No deliveries were affected.
   </div>`;
 }
 
@@ -407,12 +1016,139 @@ async function acknowledgeSchemaChange(id) {
   loadDashboard();
 }
 
+// ---------------------------------------------------------------------------
+// Audit Log
+// ---------------------------------------------------------------------------
+let _auditEntries = [];
+let _auditOffset  = 0;
+const AUDIT_LIMIT = 50;
+
+async function loadAuditLog(offset = 0) {
+  _auditOffset = offset;
+  const wrap = document.getElementById('audit-table-wrap');
+  const pag  = document.getElementById('audit-pagination');
+  if (!wrap) return;
+
+  const typeFilter   = document.getElementById('audit-type-filter')?.value   || '';
+  const actionFilter = document.getElementById('audit-action-filter')?.value || '';
+
+  wrap.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text3);font-size:13px">Loading…</div>';
+
+  let qs = `?limit=${AUDIT_LIMIT}&offset=${offset}`;
+  if (typeFilter)   qs += `&resource_type=${encodeURIComponent(typeFilter)}`;
+  if (actionFilter) qs += `&action=${encodeURIComponent(actionFilter)}`;
+
+  try {
+    const data = await apiFetch('/audit-log' + qs);
+    _auditEntries = data.entries || [];
+
+    if (!_auditEntries.length) {
+      wrap.innerHTML = `
+        <div class="empty-state">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/>
+          </svg>
+          <div class="title">No audit entries yet</div>
+          <div class="desc">Creating destinations, rotating keys, and starting replay jobs will appear here.</div>
+        </div>`;
+      if (pag) pag.innerHTML = '';
+      return;
+    }
+
+    const actionCls = { CREATE: 'completed', UPDATE: 'processing', DELETE: 'failed', REPLAY: 'pending' };
+    const resourceLabel = { destination: 'Destination', alert_config: 'Alert', webhook: 'Webhook',
+      project: 'Project', replay_job: 'Replay', api_key: 'API Key', team_member: 'Team Member' };
+
+    const rows = _auditEntries.map((e, idx) => {
+      const d    = new Date(e.created_at);
+      const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const a    = e.changes?.after;
+      const b    = e.changes?.before;
+      const detail = a?.name || b?.name
+        ? esc(a?.name || b?.name)
+        : a?.url
+          ? esc(a.url.substring(0, 50))
+          : e.resource_id
+            ? `<span class="cell-mono" style="font-size:11px">${esc(e.resource_id.substring(0, 20))}…</span>`
+            : '—';
+      const hasChanges = e.changes && (e.changes.before || e.changes.after);
+      return `
+        <tr>
+          <td style="white-space:nowrap">
+            <div style="font-size:12px;font-weight:500">${time}</div>
+            <div style="font-size:11px;color:var(--text3)">${date}</div>
+          </td>
+          <td><span class="badge ${actionCls[e.action] || 'pending'}">${esc(e.action)}</span></td>
+          <td style="font-size:12px;color:var(--text2)">${esc(resourceLabel[e.resource_type] || e.resource_type || '—')}</td>
+          <td style="font-size:12px">${detail}</td>
+          <td style="font-size:11px;font-family:var(--mono);color:var(--text3)">${esc(e.ip_address || '—')}</td>
+          <td>${hasChanges ? `<button class="btn btn-xs btn-secondary" data-idx="${idx}" onclick="toggleAuditDiff(this)">Diff</button>` : ''}</td>
+        </tr>
+        <tr class="audit-diff-row" style="display:none">
+          <td colspan="6" class="audit-diff-cell"></td>
+        </tr>`;
+    }).join('');
+
+    wrap.innerHTML = `
+      <table>
+        <thead><tr>
+          <th style="width:120px">Time</th>
+          <th style="width:90px">Action</th>
+          <th style="width:130px">Resource</th>
+          <th>Details</th>
+          <th style="width:120px">IP Address</th>
+          <th style="width:56px"></th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+
+    if (pag) {
+      const hasPrev = offset > 0;
+      const hasNext = _auditEntries.length === AUDIT_LIMIT;
+      pag.innerHTML = hasPrev || hasNext ? `
+        <button class="btn btn-secondary btn-sm" onclick="loadAuditLog(${offset - AUDIT_LIMIT})" ${hasPrev ? '' : 'disabled'}>← Prev</button>
+        <span style="font-size:12px;color:var(--text3);padding:0 12px">${offset + 1}–${offset + _auditEntries.length}</span>
+        <button class="btn btn-secondary btn-sm" onclick="loadAuditLog(${offset + AUDIT_LIMIT})" ${hasNext ? '' : 'disabled'}>Next →</button>` : '';
+    }
+  } catch (e) {
+    wrap.innerHTML = `<div style="padding:24px;text-align:center;color:var(--danger);font-size:13px">Failed to load: ${esc(e.message)}</div>`;
+  }
+}
+
+function toggleAuditDiff(btn) {
+  const idx      = parseInt(btn.dataset.idx, 10);
+  const row      = btn.closest('tr');
+  const diffRow  = row.nextElementSibling;
+  if (!diffRow?.classList.contains('audit-diff-row')) return;
+
+  const isOpen = diffRow.style.display !== 'none';
+  if (isOpen) { diffRow.style.display = 'none'; btn.textContent = 'Diff'; return; }
+
+  const changes = _auditEntries[idx]?.changes || {};
+  const cell    = diffRow.querySelector('.audit-diff-cell');
+  const cols    = [];
+  if (changes.before) cols.push(`
+    <div>
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--danger);margin-bottom:6px">Before</div>
+      <pre class="json-view" style="font-size:11px;margin:0;max-height:200px;overflow:auto">${esc(JSON.stringify(changes.before, null, 2))}</pre>
+    </div>`);
+  if (changes.after) cols.push(`
+    <div>
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--success);margin-bottom:6px">After</div>
+      <pre class="json-view" style="font-size:11px;margin:0;max-height:200px;overflow:auto">${esc(JSON.stringify(changes.after, null, 2))}</pre>
+    </div>`);
+  cell.innerHTML = `<div style="display:grid;grid-template-columns:${cols.length > 1 ? '1fr 1fr' : '1fr'};gap:16px;padding:14px">${cols.join('')}</div>`;
+  diffRow.style.display = '';
+  btn.textContent = 'Close';
+}
+
 function _renderHealthBanner(status) {
   const banner = document.getElementById('health-banner');
+  if (!banner) return;
   const title = document.getElementById('health-banner-title');
   const sub = document.getElementById('health-banner-sub');
-  const dot = document.getElementById('health-dot-large');
-
   const cfg = {
     healthy:  { cls: 'healthy',  text: 'System Healthy',  sub: 'All destinations delivering normally' },
     degraded: { cls: 'degraded', text: 'System Degraded', sub: 'Some destinations experiencing failures' },
@@ -420,8 +1156,8 @@ function _renderHealthBanner(status) {
   };
   const c = cfg[status] || cfg.healthy;
   banner.className = 'health-banner ' + c.cls;
-  title.textContent = c.text;
-  sub.textContent = c.sub;
+  if (title) title.textContent = c.text;
+  if (sub) sub.textContent = c.sub;
 }
 
 function _renderKPIs(kpis) {
@@ -450,10 +1186,10 @@ function _renderKPIs(kpis) {
   circuitCard.classList.toggle('kpi-card--alert', open > 0);
   const circuitSub = document.getElementById('kpi-circuit-sub');
   if (open > 0 && kpis.open_destinations?.length) {
-    circuitSub.textContent = 'Open: ' + kpis.open_destinations.slice(0, 2).join(', ');
+    circuitSub.textContent = 'Paused: ' + kpis.open_destinations.slice(0, 2).join(', ');
     circuitSub.style.color = 'var(--danger)';
   } else {
-    circuitSub.textContent = 'destinations healthy';
+    circuitSub.textContent = 'all delivering normally';
     circuitSub.style.color = '';
   }
 }
@@ -508,6 +1244,7 @@ function _renderSparkline(data) {
 
 function _renderRecentFailures(failures) {
   const el = document.getElementById('recent-failures-list');
+  if (!el) return;
   if (!failures.length) {
     el.innerHTML = `
       <div class="empty-state-sm">
@@ -550,8 +1287,526 @@ async function replayFailure(id) {
   } catch (e) { toast(e.message, 'error'); }
 }
 
+// ---------------------------------------------------------------------------
+// Reliability Command Center
+// ---------------------------------------------------------------------------
+async function _renderCommandCenter(kpis, incidents) {
+  let score = _computeDerivedScore(kpis, incidents);
+  let statusText = score >= 90 ? 'Healthy' : score >= 70 ? 'Degraded' : 'Critical';
+  try {
+    const h = await fetch('/api/v1/dlq/health', { credentials: 'include' });
+    if (h.ok) {
+      const hd = await h.json();
+      if (typeof hd.overall_score === 'number') score = hd.overall_score;
+      if (hd.health_status) {
+        statusText = hd.health_status.charAt(0) + hd.health_status.slice(1).toLowerCase();
+      }
+    }
+  } catch {}
+
+  const scoreEl = document.getElementById('cc-score-num');
+  if (!scoreEl) return;
+
+  const color = score >= 90 ? 'var(--success)' : score >= 70 ? 'var(--warn)' : 'var(--danger)';
+  const dotCls = score >= 90 ? 'cc-dot--ok' : score >= 70 ? 'cc-dot--warn' : 'cc-dot--err';
+
+  scoreEl.textContent = score;
+  scoreEl.style.color = color;
+
+  const barEl = document.getElementById('cc-bar-fill');
+  if (barEl) { barEl.style.width = score + '%'; barEl.style.background = color; }
+
+  const dotEl = document.getElementById('cc-dot');
+  if (dotEl) dotEl.className = 'cc-dot ' + dotCls;
+
+  const statusEl = document.getElementById('cc-status-text');
+  if (statusEl) statusEl.textContent = statusText;
+
+  const openIncidents = incidents.filter(i => i.state === 'OPEN').length;
+  const cbOpen = (kpis.circuit_breakers?.open ?? 0) + (kpis.circuit_breakers?.half_open ?? 0);
+  const dlq = kpis.dlq_depth ?? 0;
+  const healthyDests = destinations.filter(d => d.circuit_state === 'closed' && d.is_enabled !== false).length;
+
+  const setNum = (id, val, warn) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = String(val);
+    el.style.color = warn ? 'var(--danger)' : '';
+  };
+  setNum('cc-healthy-dests', healthyDests);
+  setNum('cc-open-incidents', openIncidents, openIncidents > 0);
+  setNum('cc-dlq-depth', dlq, dlq > 0);
+  setNum('cc-cb-open', cbOpen, cbOpen > 0);
+}
+
+function _computeDerivedScore(kpis, incidents) {
+  let score = 100;
+  const rate = kpis.success_rate_24h ?? 100;
+  if (rate < 100) score -= Math.min(40, (100 - rate) * 2);
+  const dlq = kpis.dlq_depth ?? 0;
+  if (dlq > 0) score -= Math.min(20, dlq * 2);
+  const cbOpen = (kpis.circuit_breakers?.open ?? 0);
+  score -= cbOpen * 8;
+  const openInc = incidents.filter(i => i.state === 'OPEN').length;
+  score -= openInc * 3;
+  return Math.max(0, Math.round(score));
+}
+
+// ---------------------------------------------------------------------------
+// Reliability Feed
+// ---------------------------------------------------------------------------
+function _pushFeedEvent(cls, msg, dest, ts) {
+  feedEvents.unshift({ cls, msg, dest: dest || '', ts: ts || new Date().toISOString() });
+  if (feedEvents.length > FEED_MAX) feedEvents.length = FEED_MAX;
+  _renderFeed(true);
+}
+
+function _renderFeed(newEventAtTop) {
+  const body = document.getElementById('mc-stream-body');
+  if (!body) return;
+  if (!feedEvents.length) {
+    const hasDest = destinations.length > 0;
+    body.innerHTML = hasDest
+      ? '<div class="mc-stream-empty">No events in the last 24 hours — POST to <code>/api/v1/ingest</code> to see live activity here</div>'
+      : '<div class="mc-stream-empty">Add a destination and send your first webhook — deliveries appear here in real time</div>';
+    return;
+  }
+
+  const typeMap = { ok: 'DELIVERED', err: 'FAILED', warn: 'INCIDENT', info: 'INFO' };
+  const clsMap  = { ok: 'ev-ok',    err: 'ev-err',  warn: 'ev-warn',  info: 'ev-info' };
+
+  body.innerHTML = feedEvents.map((e, i) => {
+    const t = new Date(e.ts);
+    const hh = t.getHours().toString().padStart(2, '0');
+    const mm = t.getMinutes().toString().padStart(2, '0');
+    const ss = t.getSeconds().toString().padStart(2, '0');
+    const timeStr = `${hh}:${mm}:${ss}`;
+    const type = typeMap[e.cls] || 'EVENT';
+    const cls  = clsMap[e.cls]  || 'ev-info';
+    const isNew = newEventAtTop && i === 0;
+    return `<div class="mc-event${isNew ? ' mc-event--new' : ''}">
+      <span class="mc-event-time">${timeStr}</span>
+      <span class="mc-event-type ${cls}">${type}</span>
+      <div class="mc-event-body">
+        <span class="mc-event-what">${esc(e.msg)}</span>
+        ${e.dest ? `<span class="mc-event-arr">→</span><span class="mc-event-where">${esc(e.dest)}</span>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ---------------------------------------------------------------------------
+// Architecture Visualization
+// ---------------------------------------------------------------------------
+function _arcVizPulse(cls) {
+  ['arch-conn-1', 'arch-conn-2', 'arch-conn-3'].forEach((id, i) => {
+    setTimeout(() => {
+      const conn = document.getElementById(id);
+      if (!conn) return;
+      const p = document.createElement('div');
+      p.className = `arch-particle arch-particle--${cls}`;
+      conn.appendChild(p);
+      setTimeout(() => p.remove(), 800);
+    }, i * 180);
+  });
+}
+
+function _renderArchViz(kpis) {
+  const rate       = kpis?.success_rate_24h;
+  const rateColor  = rate == null ? '' : rate >= 99 ? 'var(--success)' : rate >= 95 ? 'var(--warn)' : 'var(--danger)';
+  const pending    = _pendingQueue;
+  const healthyDests = destinations.filter(d => d.circuit_state === 'closed' && d.is_enabled !== false).length;
+
+  const ingestSub = document.getElementById('arch-ingest-sub');
+  const workerSub = document.getElementById('arch-worker-sub');
+  const destSub   = document.getElementById('arch-dest-sub');
+
+  if (ingestSub) {
+    ingestSub.textContent = rate != null ? rate.toFixed(1) + '% success' : '—';
+    ingestSub.style.color = rateColor;
+  }
+  if (workerSub) {
+    workerSub.textContent = pending.toLocaleString() + ' pending';
+    workerSub.style.color = pending > 50 ? 'var(--warn)' : '';
+  }
+  if (destSub) {
+    destSub.textContent   = destinations.length ? `${healthyDests} / ${destinations.length} healthy` : '—';
+    destSub.style.color   = healthyDests < destinations.length && destinations.length > 0 ? 'var(--warn)' : '';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// What Changed?
+// ---------------------------------------------------------------------------
+function _renderWhatChanged(kpis, incidents) {
+  const card = document.getElementById('what-changed-card');
+  const body = document.getElementById('wc-body');
+  if (!card || !body) return;
+
+  const rate    = kpis?.success_rate_24h ?? 100;
+  const dlq     = kpis?.dlq_depth ?? 0;
+  const openInc = (incidents || []).filter(i => i.state === 'OPEN');
+
+  if (rate >= 99 && dlq === 0 && openInc.length === 0) {
+    card.style.display = 'none';
+    return;
+  }
+
+  let html = '';
+  if (rate < 99) {
+    const cls = rate >= 95 ? 'warn' : 'bad';
+    html += `<div class="wc-metric">
+      <span class="wc-label">Success Rate</span>
+      <div class="wc-delta">
+        <span class="wc-before">100%</span>
+        <span class="wc-arrow">→</span>
+        <span class="wc-after wc-after--${cls}">${rate.toFixed(1)}%</span>
+      </div>
+    </div>`;
+  }
+  if (openInc.length > 0) {
+    const top   = openInc[0];
+    const cause = [top.category, top.subcategory].filter(Boolean).join(' · ');
+    const dest  = top.destination_name ? ' on <strong>' + esc(top.destination_name) + '</strong>' : '';
+    html += `<div class="wc-cause">Most likely cause: <strong>${esc(cause)}</strong>${dest}</div>`;
+  } else if (dlq > 0) {
+    html += `<div class="wc-cause">DLQ depth: <strong>${dlq} failed webhook${dlq !== 1 ? 's' : ''} awaiting review</strong>
+      — <a href="#" onclick="navTo('dlq-intelligence');return false;" style="color:var(--accent-light)">investigate →</a></div>`;
+  }
+
+  body.innerHTML = html;
+  card.style.display = 'flex';
+}
+
+function _syncFeedFromDashboard(failures, incidents, recentActivity) {
+  const seen = new Set(feedEvents.map(e => e._id).filter(Boolean));
+  const newEvents = [];
+
+  // Seed from recent_activity — mix of completed + failed deliveries
+  (recentActivity || []).forEach(a => {
+    if (seen.has(a.id)) return;
+    seen.add(a.id);
+    const dest = a.destination_name || _shortUrl(a.destination_url);
+    const cls  = a.status === 'completed' ? 'ok' : 'err';
+    const msg  = a.status === 'completed' ? 'Delivery succeeded' : 'Delivery failed';
+    newEvents.push({ cls, msg, dest, ts: a.updated_at, _id: a.id });
+  });
+
+  // Layer in any failures not already covered by recent_activity
+  failures.slice(0, 10).forEach(f => {
+    if (seen.has(f.id)) return;
+    seen.add(f.id);
+    const dest = f.destination_name || _shortUrl(f.destination_url);
+    const cat  = (f.failure_category || 'unknown').replace(/_/g, ' ').toLowerCase();
+    newEvents.push({ cls: 'err', msg: 'Delivery failed · ' + cat, dest, ts: f.updated_at, _id: f.id });
+  });
+
+  // Open incidents
+  incidents.filter(i => i.state === 'OPEN').slice(0, 5).forEach(i => {
+    const key = 'inc-' + i.id;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const cat = (i.category || 'Unknown').toLowerCase().replace(/_/g, ' ');
+    newEvents.push({ cls: 'warn', msg: 'Incident open · ' + cat, dest: i.destination_name || '', ts: i.last_seen_at, _id: key });
+  });
+
+  if (!newEvents.length) return;
+  const merged = [...newEvents, ...feedEvents];
+  merged.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+  feedEvents.length = 0;
+  merged.slice(0, FEED_MAX).forEach(e => feedEvents.push(e));
+  _renderFeed(false);
+}
+
 function _shortUrl(url) {
   try { const u = new URL(url); return u.hostname; } catch { return url || '—'; }
+}
+
+// ---------------------------------------------------------------------------
+// Mission Control Renderers
+// ---------------------------------------------------------------------------
+
+function _renderKPIStrip(kpis, incidents, recentFailures) {
+  const rate          = kpis?.success_rate_24h ?? null;
+  const delivered     = _mcKpis?.deliveries_today ?? 0;
+  const dlq           = kpis?.dlq_depth ?? 0;
+  const p95           = kpis?.p95_latency_ms ?? null;
+  const openIncidents = (incidents || []).filter(i => i.state === 'OPEN').length;
+  const failures      = (recentFailures || []).length;
+  const totalDests    = destinations.length;
+  const healthyDests  = destinations.filter(d => d.circuit_state === 'closed' && d.is_enabled !== false).length;
+
+  const setKpi = (numId, val, cls, cellId, alertCell) => {
+    const el = document.getElementById(numId);
+    if (el) {
+      el.textContent = val;
+      el.className = 'mc-kpi-num' + (cls ? ' mc-kpi-num--' + cls : '');
+    }
+    if (cellId) {
+      const cell = document.getElementById(cellId);
+      if (cell) cell.classList.toggle('mc-kpi-cell--alert', !!alertCell);
+    }
+  };
+
+  if (rate !== null) {
+    const cls = rate >= 99 ? 'good' : rate >= 95 ? 'warn' : 'bad';
+    setKpi('mc-kpi-rate', rate.toFixed(1) + '%', cls, 'mc-kpi-cell-rate', rate < 95);
+  }
+
+  setKpi('mc-kpi-delivered',
+    delivered > 0 ? delivered.toLocaleString() : '0',
+    delivered > 0 ? 'good' : '',
+    'mc-kpi-cell-delivered', false);
+
+  setKpi('mc-kpi-failures',
+    failures > 0 ? failures : '0',
+    failures > 0 ? 'bad' : 'good',
+    'mc-kpi-cell-failures', failures > 0);
+
+  setKpi('mc-kpi-dlq-strip',
+    dlq > 0 ? dlq.toLocaleString() : '0',
+    dlq > 0 ? (dlq >= 10 ? 'bad' : 'warn') : 'good',
+    'mc-kpi-cell-dlq', dlq > 0);
+
+  setKpi('mc-kpi-incidents',
+    openIncidents > 0 ? openIncidents : '0',
+    openIncidents > 0 ? 'bad' : 'good',
+    'mc-kpi-cell-incidents', openIncidents > 0);
+
+  if (p95 !== null) {
+    setKpi('mc-kpi-p95-strip',
+      p95 > 0 ? p95 + ' ms' : '—',
+      p95 > 5000 ? 'bad' : p95 > 2000 ? 'warn' : '',
+      'mc-kpi-cell-p95', p95 > 5000);
+  }
+
+  if (totalDests > 0) {
+    const destBad = healthyDests < totalDests;
+    setKpi('mc-kpi-dests',
+      healthyDests + '/' + totalDests,
+      destBad ? 'warn' : 'good',
+      'mc-kpi-cell-dests', destBad);
+  } else {
+    setKpi('mc-kpi-dests', '0', '', 'mc-kpi-cell-dests', false);
+  }
+}
+
+function _renderMCBanner() {
+  const dot    = document.getElementById('mc-signal-dot');
+  const text   = document.getElementById('mc-signal-text');
+  const meta   = document.getElementById('mc-banner-meta');
+  const banner = document.getElementById('mc-banner');
+  if (!dot || !text || !meta || !banner) return;
+
+  const kpis            = _mcKpis || {};
+  const status          = _mcSystemStatus || 'healthy';
+  const dlq             = kpis.dlq_depth ?? 0;
+  const cbOpen          = (kpis.circuit_breakers?.open ?? 0) + (kpis.circuit_breakers?.half_open ?? 0);
+  const rate            = kpis.success_rate_24h ?? 100;
+  const deliveriesToday = kpis.deliveries_today ?? 0;
+  const lastDelivery    = kpis.last_delivery_at || null;
+
+  let level, mainText;
+  if (status === 'critical' || cbOpen > 0) {
+    level    = 'crit';
+    mainText = cbOpen > 0
+      ? `${cbOpen} circuit breaker${cbOpen > 1 ? 's' : ''} open — deliveries suspended`
+      : 'System critical';
+  } else if (status === 'degraded' || dlq > 0 || rate < 99) {
+    level    = 'warn';
+    mainText = rate < 99
+      ? `Delivery rate degraded — ${rate.toFixed(1)}%`
+      : dlq > 0
+        ? `${dlq} event${dlq !== 1 ? 's' : ''} in dead letter queue`
+        : 'System degraded';
+  } else {
+    level    = 'ok';
+    mainText = destinations.length > 0 ? 'All systems operational' : 'Ready to route events';
+  }
+
+  dot.className    = 'mc-signal-dot ' + level;
+  text.className   = 'mc-signal-text text-' + level;
+  text.textContent = mainText;
+  banner.className = 'mc-banner banner-' + level;
+
+  const metaParts = [];
+
+  // Most alive piece: last delivery with seconds precision
+  if (lastDelivery) {
+    const secs = Math.floor((Date.now() - new Date(lastDelivery)) / 1000);
+    const lastStr = secs < 60 ? `${secs}s ago` : relTime(lastDelivery);
+    metaParts.push(`<span class="mc-meta-item">Last delivery: ${lastStr}</span>`);
+  } else if (destinations.length > 0) {
+    metaParts.push(`<span class="mc-meta-item mc-meta-muted">No deliveries yet</span>`);
+  }
+
+  // Deliveries today — gives the system a heartbeat
+  if (deliveriesToday > 0) {
+    metaParts.push(`<span class="mc-meta-item">${deliveriesToday.toLocaleString()} delivered today</span>`);
+  }
+
+  // Worker — only surface when something is wrong
+  if (!_mcWorkerOk) {
+    metaParts.push(`<span class="mc-meta-item meta-crit">worker offline</span>`);
+  }
+
+  // Destinations — only surface degraded count
+  if (destinations.length > 0) {
+    const healthyDests = destinations.filter(d => d.circuit_state === 'closed' && d.is_enabled !== false).length;
+    if (healthyDests < destinations.length) {
+      const n = destinations.length - healthyDests;
+      metaParts.push(`<span class="mc-meta-item meta-warn">${n} destination${n > 1 ? 's' : ''} degraded</span>`);
+    }
+  }
+
+  // Queue pressure — only when backed up
+  if (_mcPending > 50) {
+    metaParts.push(`<span class="mc-meta-item meta-warn">${_mcPending.toLocaleString()} pending</span>`);
+  }
+
+  meta.innerHTML = metaParts.join('');
+}
+
+function _renderMCTriage(kpis, incidents, sloBreaches, schemaDrift) {
+  const triage = document.getElementById('mc-triage');
+  const list   = document.getElementById('mc-triage-list');
+  if (!triage || !list) return;
+
+  const items  = [];
+  const dlq    = kpis?.dlq_depth ?? 0;
+  const cbOpen = kpis?.circuit_breakers?.open ?? 0;
+  const openInc = (incidents || []).filter(i => i.state === 'OPEN');
+
+  openInc.forEach(i => {
+    const dest    = i.destination_name || 'a destination';
+    const count   = i.affected_count ?? 0;
+    const countTxt = count > 0 ? ` — ${count} event${count !== 1 ? 's' : ''} affected` : '';
+    items.push({
+      sev: 'crit',
+      html: `<strong>${esc(dest)}</strong> is failing deliveries${countTxt}`,
+      action: { label: 'Review →', fn: `navTo('dlq-intelligence')` },
+    });
+  });
+
+  if (cbOpen > 0) {
+    const openDests = kpis.open_destinations?.length ? kpis.open_destinations : [];
+    if (openDests.length) {
+      openDests.forEach(d => items.push({
+        sev: 'crit',
+        html: `<strong>${esc(d)}</strong> has stopped responding — deliveries paused`,
+        action: { label: 'Fix it →', fn: `navTo('destinations')` },
+      }));
+    } else {
+      items.push({
+        sev: 'crit',
+        html: `${cbOpen} destination${cbOpen > 1 ? 's have' : ' has'} stopped responding — deliveries paused`,
+        action: { label: 'Fix it →', fn: `navTo('destinations')` },
+      });
+    }
+  }
+
+  if (dlq > 0) {
+    items.push({
+      sev: 'warn',
+      html: `<strong>${dlq} event${dlq !== 1 ? 's' : ''}</strong> could not be delivered after all retry attempts`,
+      action: { label: 'Review →', fn: `navTo('dlq-intelligence')` },
+    });
+  }
+
+  (sloBreaches || []).forEach(b => {
+    items.push({
+      sev: 'warn',
+      html: `<strong>${esc(b.destination_name)}</strong> is below its reliability goal — ${b.current_pct.toFixed(1)}% delivered (goal: ${b.target_pct}%)`,
+      action: { label: 'View trends →', fn: `navTo('analytics')` },
+    });
+  });
+
+  if (schemaDrift > 0) {
+    items.push({
+      sev: 'warn',
+      html: `Your source started sending a different payload shape — ${schemaDrift} change${schemaDrift > 1 ? 's' : ''} detected. No deliveries were affected.`,
+      action: null,
+    });
+  }
+
+  const critSvg = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+  const warnSvg = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
+  const checkSvg = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+
+  const hdr = triage.querySelector('.mc-triage-hdr');
+
+  if (!items.length) {
+    triage.style.display = '';
+    triage.classList.add('mc-triage--ok');
+    if (hdr) hdr.innerHTML = `${checkSvg} Everything looks good`;
+    list.innerHTML = `
+      <div class="mc-triage-item">
+        <div class="mc-triage-text mc-triage-text--muted" style="padding-left:4px">No issues to review. Your deliveries are running normally.</div>
+      </div>`;
+    return;
+  }
+
+  triage.classList.remove('mc-triage--ok');
+  triage.style.display = '';
+  if (hdr) hdr.innerHTML = `${warnSvg} Needs attention`;
+  list.innerHTML = items.map(item => `
+    <div class="mc-triage-item">
+      <div class="mc-triage-icon mc-triage-icon--${item.sev}">${item.sev === 'crit' ? critSvg : warnSvg}</div>
+      <div class="mc-triage-text">${item.html}</div>
+      ${item.action ? `<button class="mc-triage-action" onclick="${item.action.fn}">${item.action.label}</button>` : ''}
+    </div>`).join('');
+}
+
+function _renderMCDLQ(dlq) {
+  const block = document.getElementById('mc-dlq-block');
+  const numEl = document.getElementById('mc-dlq-num');
+  if (!block) return;
+  block.style.display = dlq > 0 ? '' : 'none';
+  if (numEl && dlq > 0) numEl.textContent = dlq.toLocaleString();
+  // Keep global depth in sync with dashboard data
+  if (dlq !== _dlqDepth) { _dlqDepth = dlq; _updateDLQIndicators(dlq); }
+}
+
+function _renderMCDestinations() {
+  const el = document.getElementById('mc-dest-list');
+  if (!el) return;
+  // Keep the KPI strip destinations cell current
+  const totalDests   = destinations.length;
+  const healthyDests = destinations.filter(d => d.circuit_state === 'closed' && d.is_enabled !== false).length;
+  const numEl = document.getElementById('mc-kpi-dests');
+  const cellEl = document.getElementById('mc-kpi-cell-dests');
+  if (numEl) {
+    numEl.textContent = totalDests > 0 ? healthyDests + '/' + totalDests : '0';
+    numEl.className = 'mc-kpi-num' + (totalDests === 0 ? '' : healthyDests < totalDests ? ' mc-kpi-num--warn' : ' mc-kpi-num--good');
+  }
+  if (cellEl) cellEl.classList.toggle('mc-kpi-cell--alert', totalDests > 0 && healthyDests < totalDests);
+  if (!destinations.length) {
+    el.innerHTML = '<div class="mc-stream-empty" style="padding:16px 12px">No destinations configured</div>';
+    return;
+  }
+
+  const statusCls = d => {
+    if (!d.is_enabled) return 'disabled';
+    if (d.circuit_state === 'open') return 'unhealthy';
+    if (d.circuit_state === 'half_open') return 'degraded';
+    return 'healthy';
+  };
+
+  el.innerHTML = destinations.map(d => {
+    const dot  = statusCls(d);
+    const name = d.name || _shortUrl(d.url);
+    const circuit = d.circuit_state || 'closed';
+    const rateEl = document.getElementById(`dest-rate-${d.id}`);
+    const rateText = rateEl?.textContent || '—';
+    const ratePct = parseFloat(rateText);
+    const rateCls = isNaN(ratePct) ? '' : ratePct >= 99 ? '' : ratePct >= 95 ? 'rate-warn' : 'rate-bad';
+    return `<div class="mc-dest-row" onclick="navTo('destinations')">
+      <div class="mc-dest-dot ${dot}"></div>
+      <span class="mc-dest-name">${esc(name)}</span>
+      <span class="mc-dest-rate ${rateCls}" id="mc-dr-${d.id}">${rateText}</span>
+      <span class="mc-dest-cb circuit-${circuit}">${circuit.replace('_', '·').toUpperCase()}</span>
+    </div>`;
+  }).join('');
 }
 
 // ---------------------------------------------------------------------------
@@ -645,7 +1900,7 @@ async function openPanel(id) {
     document.getElementById('panel-headers').textContent = JSON.stringify(w.headers, null, 2);
 
     const replay = document.getElementById('panel-replay-btn');
-    replay.style.display = w.status === 'failed' ? 'inline-flex' : 'none';
+    replay.style.display = (w.status === 'failed' || w.status === 'dead') ? 'inline-flex' : 'none';
 
     // Timeline
     const timeline = document.getElementById('panel-timeline');
@@ -655,6 +1910,15 @@ async function openPanel(id) {
       timeline.innerHTML = w.attempts.map(a => {
         const ok = a.status_code >= 200 && a.status_code < 300;
         const cls = ok ? 'success' : 'failed';
+        const cat = a.failure_category;
+        const catColor = {
+          TIMEOUT: 'var(--warn)', NETWORK: 'var(--warn)', SERVER_ERROR: 'var(--info)',
+          AUTHENTICATION: 'var(--danger)', AUTHORIZATION: 'var(--danger)',
+          RATE_LIMITING: 'var(--accent-light)', CLIENT_ERROR: 'var(--text2)',
+          DNS: 'var(--warn)', SSL: 'var(--danger)', CIRCUIT_BREAKER: 'var(--danger)',
+        }[cat] || 'var(--text3)';
+        const catBadge = cat && !ok ? `<span style="font-size:10px;border:1px solid ${catColor};color:${catColor};border-radius:4px;padding:1px 5px;margin-left:6px">${cat.replace(/_/g,' ')}</span>` : '';
+        const advice = cat && !ok ? _failureCategoryAdvice(cat) : '';
         return `
           <div class="timeline-item">
             <div class="timeline-dot ${cls}">${a.attempt_number}</div>
@@ -663,9 +1927,11 @@ async function openPanel(id) {
                 ${ok ? '✅' : '❌'} Attempt ${a.attempt_number}
                 ${a.status_code ? `<span class="inline-code">${a.status_code}</span>` : ''}
                 ${a.duration_ms ? `<span style="color:var(--text3);font-size:11px">${a.duration_ms}ms</span>` : ''}
+                ${catBadge}
               </div>
               <div class="timeline-meta">${a.attempted_at ? relTime(a.attempted_at) : ''}${a.retry_strategy_used ? ` · ${a.retry_strategy_used}` : ''}</div>
               ${a.error_message ? `<div class="timeline-error">${esc(a.error_message)}</div>` : ''}
+              ${advice ? `<div style="margin-top:5px;font-size:11px;color:var(--text3);line-height:1.4">${advice}</div>` : ''}
             </div>
           </div>
         `;
@@ -699,6 +1965,7 @@ async function loadDestinations() {
     destinations = await apiFetch('/destinations');
     renderDestTable();
     populateDestSelects();
+    _loadDestRates();
   } catch {}
 }
 
@@ -719,7 +1986,7 @@ function renderDestTable() {
   }
 
   if (!destinations.length) {
-    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state">
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state">
       <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/></svg>
       <div class="title">No destinations yet</div>
       <div class="desc">Add a destination to start routing webhooks to your endpoints.</div>
@@ -727,7 +1994,8 @@ function renderDestTable() {
     return;
   }
 
-  const circuitClass = s => s === 'closed' ? 'CLOSED' : s === 'half_open' ? 'HALF_OPEN' : 'OPEN';
+  const circuitCssClass = s => s === 'closed' ? 'CLOSED' : s === 'half_open' ? 'HALF_OPEN' : 'OPEN';
+  const circuitLabel    = s => ({ closed: 'Healthy', half_open: 'Recovering', open: 'Suspended' })[s] || s;
   const statusClass  = d => {
     if (d.circuit_state === 'open') return 'unhealthy';
     if (d.circuit_state === 'half_open') return 'degraded';
@@ -735,40 +2003,71 @@ function renderDestTable() {
   };
   const statusLabel  = d => {
     if (!d.is_enabled) return 'Disabled';
-    if (d.circuit_state === 'open') return 'Open';
+    if (d.circuit_state === 'open') return 'Suspended';
     if (d.circuit_state === 'half_open') return 'Recovering';
     return 'Healthy';
   };
+  const circuitTooltip = s => ({
+    closed:    'Healthy — deliveries are passing through normally.',
+    half_open: 'Recovering — this destination recently failed. Relora is sending test deliveries to check if it has recovered. No action needed.',
+    open:      'Suspended — too many consecutive failures. Deliveries to this destination are paused. Fix the destination issue, then click Reset.',
+  }[s] || '');
 
-  tbody.innerHTML = destinations.map(d => `
+  tbody.innerHTML = destinations.map(d => {
+    const isOpen = d.circuit_state === 'open' || d.circuit_state === 'half_open';
+    return `
     <tr>
       <td><span class="dest-status-dot ${statusClass(d)}">${statusLabel(d)}</span></td>
       <td style="font-weight:500;color:var(--text)">${esc(d.name)}</td>
       <td class="cell-url" title="${esc(d.url)}">${esc(d.url)}</td>
       <td style="font-family:var(--mono);font-size:12px">0 / ${d.max_retries}</td>
-      <td><span class="circuit-text ${circuitClass(d.circuit_state)}">${circuitClass(d.circuit_state).replace('_', '‑')}</span></td>
+      <td>
+        <span class="circuit-text ${circuitCssClass(d.circuit_state)}" title="${circuitTooltip(d.circuit_state)}" style="cursor:help">${circuitLabel(d.circuit_state)}</span>
+        ${isOpen ? `<button class="btn btn-xs btn-secondary" style="margin-left:6px" title="Force circuit back to CLOSED" onclick="resetCircuitBreaker('${d.id}')">Reset</button>` : ''}
+      </td>
+      <td id="dest-rate-${d.id}" style="font-family:var(--mono);font-size:12px;color:var(--text3)">—</td>
       <td>
         <div class="dest-row-actions">
+          <button class="btn btn-xs btn-secondary" title="Ping the endpoint to verify it responds" onclick="testDestination('${d.id}')">Ping</button>
+          <button class="btn btn-xs btn-secondary" title="Send a real test event through the delivery pipeline" onclick="sendTestEvent('${d.id}')">Test</button>
           <button class="btn btn-xs btn-secondary" onclick="viewDestSla('${d.id}','${esc(d.name)}')">SLA</button>
           <button class="btn btn-xs btn-secondary" onclick="openDestModal(destinations.find(x=>x.id==='${d.id}'))">Edit</button>
           <button class="btn btn-xs btn-danger" onclick="deleteDestination('${d.id}')">Delete</button>
         </div>
       </td>
     </tr>
-  `).join('');
+  `}).join('');
+}
+
+async function _loadDestRates() {
+  if (!destinations.length) return;
+  await Promise.allSettled(destinations.map(async d => {
+    try {
+      const s = await apiFetch(`/destinations/${d.id}/stats`);
+      const cell = document.getElementById(`dest-rate-${d.id}`);
+      if (!cell) return;
+      const rate = s.success_rate ?? s.delivery_rate ?? null;
+      if (rate === null) return;
+      const pct = Math.round(rate * 100) / 100;
+      const color = pct >= 99 ? 'var(--success)' : pct >= 95 ? 'var(--warn)' : 'var(--danger)';
+      cell.textContent = pct + '%';
+      cell.style.color = color;
+    } catch {}
+  }));
 }
 
 function populateDestSelects() {
-  const selects = ['wh-dest-filter', 'sim-destination', 'replay-dest'];
-  selects.forEach(id => {
+  const blanks = { 'sim-destination': '<option value="">Select a destination…</option>' };
+  ['wh-dest-filter', 'sim-destination', 'replay-dest'].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
-    const blank = el.querySelector('option[value=""]')?.outerHTML || '<option value="">All</option>';
+    const blank = blanks[id] || el.querySelector('option[value=""]')?.outerHTML || '<option value="">All</option>';
     el.innerHTML = blank + destinations.map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join('');
   });
 }
 
 function openDestModal(existing = null) {
+  _editingDestId = existing?.id || null;
   document.getElementById('dest-name').value = existing?.name || '';
   document.getElementById('dest-url').value = existing?.url || '';
   document.getElementById('dest-max-retries').value = existing?.max_retries ?? 5;
@@ -815,9 +2114,16 @@ async function saveDestination() {
   };
   if (!body.name || !body.url) { toast('Name and URL are required', 'error'); return; }
   try {
-    await apiFetch('/destinations', { method: 'POST', body: JSON.stringify(body) });
-    closeModal('modal-dest');
-    toast('Destination created', 'success');
+    if (_editingDestId) {
+      await apiFetch(`/destinations/${_editingDestId}`, { method: 'PUT', body: JSON.stringify(body) });
+      closeModal('modal-dest');
+      toast('Destination updated', 'success');
+    } else {
+      await apiFetch('/destinations', { method: 'POST', body: JSON.stringify(body) });
+      closeModal('modal-dest');
+      toast('Destination created', 'success');
+    }
+    _editingDestId = null;
     await loadDestinations();
   } catch (e) { toast(e.message, 'error'); }
 }
@@ -838,6 +2144,92 @@ async function deleteDestination(id) {
   } catch (e) { toast(e.message, 'error'); }
 }
 
+async function sendTestEvent(id) {
+  try {
+    const r = await apiFetch(`/destinations/${id}/send-test-event`, { method: 'POST' });
+    toast(`Test event queued for "${r.destination}" — watch the activity feed`, 'success');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function clearTestData() {
+  if (!confirm('Delete all test/simulated events? This cannot be undone.')) return;
+  try {
+    const r = await apiFetch('/data/test', { method: 'DELETE' });
+    toast(r.message, 'success');
+    await loadDashboard();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// ---------------------------------------------------------------------------
+// Simulator
+// ---------------------------------------------------------------------------
+const _SIM_PROVIDERS = {
+  stripe:  ['payment_intent.succeeded', 'payment_intent.payment_failed', 'customer.subscription.created', 'invoice.paid'],
+  github:  ['push', 'pull_request.opened', 'issues.opened'],
+  shopify: ['orders/create', 'orders/paid', 'customers/create'],
+};
+
+function openSimModal() {
+  updateSimEventTypes();
+  document.getElementById('sim-result').style.display = 'none';
+  openModal('modal-sim');
+}
+
+function updateSimEventTypes() {
+  const provider = document.getElementById('sim-provider').value;
+  const events = _SIM_PROVIDERS[provider] || [];
+  const sel = document.getElementById('sim-event-type');
+  sel.innerHTML = events.map(e => `<option value="${e}">${e}</option>`).join('');
+}
+
+const _SIM_OUTCOME_LABELS = {
+  real:    'Real delivery',
+  success: 'Forced success (200)',
+  fail:    'Forced fail (500 → DLQ)',
+  flaky:   'Flaky (fails #1, recovers #2)',
+};
+
+async function runSimulate() {
+  const destId    = document.getElementById('sim-destination').value;
+  const provider  = document.getElementById('sim-provider').value;
+  const eventType = document.getElementById('sim-event-type').value;
+  const outcome   = document.getElementById('sim-outcome').value;
+  const resultEl  = document.getElementById('sim-result');
+  const btn       = document.getElementById('sim-send-btn');
+
+  if (!destId) { toast('Select a destination first', 'error'); return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  resultEl.style.display = 'none';
+
+  try {
+    const r = await apiFetch('/simulate', {
+      method: 'POST',
+      body: JSON.stringify({ provider, event_type: eventType, destination_id: destId, outcome }),
+    });
+    const label = _SIM_OUTCOME_LABELS[outcome] || outcome;
+    resultEl.style.display = '';
+    resultEl.style.color = 'var(--success)';
+    resultEl.textContent = `Queued ${r.webhook_id} · ${provider}/${eventType} · ${label}`;
+    const hint = outcome === 'fail'
+      ? 'Test event sent — will exhaust retries and land in DLQ'
+      : outcome === 'flaky'
+        ? 'Test event sent — watch it fail once then recover in Webhooks'
+        : 'Test event sent — check Webhooks tab';
+    toast(hint, 'success');
+    loadDashboard();
+  } catch (e) {
+    resultEl.style.display = '';
+    resultEl.style.color = 'var(--danger)';
+    resultEl.textContent = e.message;
+    toast(e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg> Send';
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Alerts
 // ---------------------------------------------------------------------------
@@ -850,25 +2242,32 @@ async function loadAlerts() {
       el.innerHTML = `<div class="empty-state"><div class="icon">🔔</div><div class="title">No alert channels</div><div class="desc">Add Slack or email to get notified on DLQ events</div></div>`;
       return;
     }
-    el.innerHTML = alerts.map(a => `
+    el.innerHTML = alerts.map(a => {
+      const triggers = [];
+      if (a.dlq_threshold != null) triggers.push(`DLQ ≥ ${a.dlq_threshold}`);
+      if (a.error_rate_threshold != null) triggers.push(`rate < ${a.error_rate_threshold}%`);
+      const triggerText = triggers.length ? triggers.join(' · ') : 'Any DLQ event';
+      return `
       <div class="alert-row">
         <div class="alert-icon">${a.channel_type === 'slack' ? '💬' : '📧'}</div>
         <div class="alert-info">
           <div class="alert-name">${esc(a.name)}</div>
-          <div class="alert-type">${a.channel_type} · ${a.enabled ? 'Enabled' : 'Disabled'}</div>
+          <div class="alert-type">${a.channel_type} · ${a.enabled ? 'Enabled' : 'Disabled'} · Triggers: ${esc(triggerText)}</div>
         </div>
         <div class="alert-actions">
           <button class="btn btn-xs btn-secondary" onclick="testAlert('${a.id}')">Test</button>
           <button class="btn btn-xs btn-danger" onclick="deleteAlert('${a.id}')">Delete</button>
         </div>
       </div>
-    `).join('');
+    `}).join('');
   } catch {}
 }
 
 function openAlertModal() {
   document.getElementById('alert-name').value = '';
   document.getElementById('alert-slack-url').value = '';
+  document.getElementById('alert-dlq-threshold').value = '';
+  document.getElementById('alert-error-threshold').value = '';
   toggleAlertFields();
   openModal('modal-alert');
 }
@@ -891,7 +2290,15 @@ async function saveAlert() {
     from: document.getElementById('alert-smtp-from').value,
     to: document.getElementById('alert-smtp-to').value,
   };
-  const body = { name: document.getElementById('alert-name').value, channel_type: type, config };
+  const dlqRaw = document.getElementById('alert-dlq-threshold').value;
+  const errRaw = document.getElementById('alert-error-threshold').value;
+  const body = {
+    name: document.getElementById('alert-name').value,
+    channel_type: type,
+    config,
+    dlq_threshold: dlqRaw ? parseInt(dlqRaw) : null,
+    error_rate_threshold: errRaw ? parseFloat(errRaw) : null,
+  };
   try {
     await apiFetch('/alerts', { method: 'POST', body: JSON.stringify(body) });
     closeModal('modal-alert');
@@ -917,110 +2324,66 @@ async function deleteAlert(id) {
 }
 
 // ---------------------------------------------------------------------------
-// Event Types
-// ---------------------------------------------------------------------------
-async function loadEventTypes() {
-  try {
-    const types = await apiFetch('/event-types');
-    const el = document.getElementById('event-types-list');
-    if (!el) return;
-    if (!types.length) {
-      el.innerHTML = `<div class="empty-state"><div class="icon">📋</div><div class="title">No event types</div><div class="desc">Register event types to document your webhook schema</div></div>`;
-      return;
-    }
-    el.innerHTML = `<div class="table-wrap"><table>
-      <thead><tr><th>Name</th><th>Version</th><th>Description</th><th>Actions</th></tr></thead>
-      <tbody>${types.map(t => `
-        <tr>
-          <td class="cell-mono">${esc(t.name)}</td>
-          <td><span class="inline-code">v${t.version}</span></td>
-          <td style="color:var(--text2)">${esc(t.description || '—')}</td>
-          <td><button class="btn btn-xs btn-danger" onclick="deleteEventType('${t.id}')">Delete</button></td>
-        </tr>
-      `).join('')}</tbody>
-    </table></div>`;
-  } catch {}
-}
-
-function openEventTypeModal() { openModal('modal-event-type'); }
-
-async function saveEventType() {
-  const body = {
-    name: document.getElementById('et-name').value.trim(),
-    description: document.getElementById('et-desc').value.trim(),
-    version: document.getElementById('et-version').value.trim() || '1',
-    example_payload: (() => { try { return JSON.parse(document.getElementById('et-example').value); } catch { return null; } })(),
-  };
-  if (!body.name) { toast('Name is required', 'error'); return; }
-  try {
-    await apiFetch('/event-types', { method: 'POST', body: JSON.stringify(body) });
-    closeModal('modal-event-type');
-    toast('Event type created', 'success');
-    loadEventTypes();
-  } catch (e) { toast(e.message, 'error'); }
-}
-
-async function deleteEventType(id) {
-  if (!confirm('Delete this event type?')) return;
-  try {
-    await apiFetch(`/event-types/${id}`, { method: 'DELETE' });
-    toast('Deleted', 'success');
-    loadEventTypes();
-  } catch (e) { toast(e.message, 'error'); }
-}
-
-// ---------------------------------------------------------------------------
-// Simulator
-// ---------------------------------------------------------------------------
-async function initSimulator() {
-  await loadDestinations();
-  loadSimEventTypes();
-  populateDestSelects();
-}
-
-async function loadSimEventTypes() {
-  try {
-    const providers = await apiFetch('/simulate/providers');
-    const provider = document.getElementById('sim-provider')?.value || 'stripe';
-    const sel = document.getElementById('sim-event-type');
-    if (!sel) return;
-    const events = providers[provider] || [];
-    sel.innerHTML = events.map(e => `<option value="${e}">${e}</option>`).join('');
-  } catch {}
-}
-
-async function fireSimulation() {
-  const provider = document.getElementById('sim-provider').value;
-  const event_type = document.getElementById('sim-event-type').value;
-  const destination_id = document.getElementById('sim-destination').value;
-  if (!destination_id) { toast('Select a destination', 'error'); return; }
-  try {
-    const r = await apiFetch('/simulate', {
-      method: 'POST',
-      body: JSON.stringify({ provider, event_type, destination_id }),
-    });
-    const el = document.getElementById('sim-result');
-    el.innerHTML = `
-      <div style="color:var(--success);font-weight:500;margin-bottom:12px">✅ Fired! Webhook ID: <span class="inline-code">${r.webhook_id.substring(0,8)}…</span></div>
-      <div style="font-size:12px;color:var(--text3);margin-bottom:8px">Payload sent:</div>
-      <div class="json-view">${JSON.stringify(r.payload, null, 2)}</div>
-    `;
-    toast('Simulation fired', 'success');
-    loadWebhooks(1);
-  } catch (e) { toast(e.message, 'error'); }
-}
-
-// ---------------------------------------------------------------------------
 // Bulk Replay
 // ---------------------------------------------------------------------------
+let _replayPollTimer = null;
+
 function initReplay() {
   populateDestSelects();
-  // Set sensible defaults: last 1 hour
   const now = new Date();
   const oneHourAgo = new Date(now - 3600000);
   document.getElementById('replay-from').value = toLocalDatetimeString(oneHourAgo);
   document.getElementById('replay-to').value = toLocalDatetimeString(now);
+  loadReplayJobs();
 }
+
+async function loadReplayJobs() {
+  const el = document.getElementById('replay-jobs-list');
+  if (!el) return;
+  try {
+    const jobs = await apiFetch('/replay-jobs');
+    _renderReplayJobs(jobs);
+  } catch {}
+}
+
+function _renderReplayJobs(jobs) {
+  const el = document.getElementById('replay-jobs-list');
+  if (!el) return;
+  if (!jobs.length) {
+    el.innerHTML = `<div class="empty-state">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
+      <div class="title">No replay jobs yet</div>
+      <div class="desc">Replay re-queues failed webhooks through the delivery pipeline at a controlled rate.</div>
+    </div>`;
+    return;
+  }
+  const statusColor = { pending: 'var(--text3)', running: 'var(--accent)', completed: 'var(--success)', failed: 'var(--danger)' };
+  const statusBadge = s => `<span class="badge ${s === 'completed' ? 'completed' : s === 'failed' ? 'failed' : s === 'running' ? 'processing' : 'pending'}">${s}</span>`;
+  el.innerHTML = `<div style="display:flex;flex-direction:column;gap:8px">` + jobs.map(j => {
+    const pct = j.total_count > 0 ? Math.round(j.processed_count / j.total_count * 100) : 0;
+    const isRunning = j.status === 'running' || j.status === 'pending';
+    const destLabel = j.destination_id ? (destinations.find(d => d.id === j.destination_id)?.name || j.destination_id.substring(0,8) + '…') : 'All destinations';
+    return `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px" id="replay-job-${j.id}">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="font-weight:500;font-size:13px">Job <span class="inline-code">${j.id.substring(0,8)}…</span></div>
+        ${statusBadge(j.status)}
+      </div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:${isRunning ? '10px' : '0'}">${j.total_count} webhooks · ${j.replay_rate_per_minute} evt/min · ${esc(destLabel)} · ${relTime(j.created_at)}</div>
+      ${isRunning ? `
+        <div style="background:var(--surface);border-radius:4px;height:6px;overflow:hidden;margin-bottom:6px">
+          <div style="height:100%;width:${pct}%;background:var(--accent);transition:width .5s"></div>
+        </div>
+        <div style="font-size:11px;color:var(--text3)">${j.processed_count} / ${j.total_count} processed (${pct}%)</div>
+      ` : j.status === 'completed' ? `
+        <div style="font-size:12px;color:var(--success)">✓ ${j.processed_count} events replayed</div>
+      ` : j.status === 'failed' ? `
+        <div style="font-size:12px;color:var(--danger)">${esc(j.error_message || 'Job failed')}</div>
+      ` : ''}
+    </div>`;
+  }).join('') + `</div>`;
+}
+
+let _activeReplayJobId = null;
 
 async function startBulkReplay() {
   const from = document.getElementById('replay-from').value;
@@ -1038,14 +2401,31 @@ async function startBulkReplay() {
         replay_rate_per_minute: rate,
       }),
     });
-    toast(`Replay job started: ${r.total_count} webhooks (~${r.estimated_duration_minutes} min)`, 'info');
-    document.getElementById('replay-jobs-list').innerHTML = `
-      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px">
-        <div style="font-weight:500;margin-bottom:4px">Job <span class="inline-code">${r.job_id.substring(0,8)}…</span></div>
-        <div style="font-size:12px;color:var(--text3)">${r.total_count} webhooks · est. ${r.estimated_duration_minutes} min · ${rate} evt/min</div>
-      </div>
-    `;
+    toast(`Replay job started — ${r.total_count} webhooks queued`, 'success');
+    _activeReplayJobId = r.job_id;
+    loadReplayJobs();
+    _startReplayPoll(r.job_id);
   } catch (e) { toast(e.message, 'error'); }
+}
+
+function _startReplayPoll(jobId) {
+  if (_replayPollTimer) clearInterval(_replayPollTimer);
+  _replayPollTimer = setInterval(async () => {
+    try {
+      const job = await apiFetch(`/replay-jobs/${jobId}`);
+      // Update the specific job row if visible
+      loadReplayJobs();
+      if (job.status === 'completed' || job.status === 'failed') {
+        clearInterval(_replayPollTimer);
+        _replayPollTimer = null;
+        const msg = job.status === 'completed'
+          ? `Replay complete — ${job.processed_count} events replayed`
+          : `Replay job failed: ${job.error_message || 'unknown error'}`;
+        toast(msg, job.status === 'completed' ? 'success' : 'error');
+        loadDashboard();
+      }
+    } catch { clearInterval(_replayPollTimer); _replayPollTimer = null; }
+  }, 3000);
 }
 
 // ---------------------------------------------------------------------------
@@ -1057,16 +2437,28 @@ async function loadTeam() {
     const members = await apiFetch(`/projects/${currentProject.id}/members`);
     const el = document.getElementById('team-list');
     if (!el) return;
+    const isOwner = members.find(m => m.user_id === currentUser?.id)?.role === 'owner';
     el.innerHTML = `<table>
-      <thead><tr><th>Email</th><th>Role</th><th>Joined</th><th>Actions</th></tr></thead>
-      <tbody>${members.map(m => `
-        <tr>
+      <thead><tr><th>Email</th><th>Role</th><th>Joined</th><th style="width:160px"></th></tr></thead>
+      <tbody>${members.map(m => {
+        const isSelf = m.user_id === currentUser?.id;
+        const roleSelect = isOwner && !isSelf
+          ? `<select class="select" style="height:26px;font-size:11px;padding:2px 6px;width:90px" onchange="changeMemberRole('${m.user_id}',this.value)">
+              <option value="viewer"${m.role==='viewer'?' selected':''}>viewer</option>
+              <option value="admin"${m.role==='admin'?' selected':''}>admin</option>
+              <option value="owner"${m.role==='owner'?' selected':''}>owner</option>
+            </select>`
+          : `<span class="badge ${m.role === 'owner' ? 'completed' : 'pending'}">${m.role}</span>`;
+        const removeBtn = isOwner && !isSelf
+          ? `<button class="btn btn-xs btn-danger" onclick="removeMember('${m.user_id}')">Remove</button>`
+          : '';
+        return `<tr>
           <td>${esc(m.email || '—')}</td>
-          <td><span class="badge ${m.role === 'owner' ? 'completed' : 'pending'}">${m.role}</span></td>
+          <td>${roleSelect}</td>
           <td class="cell-time">${relTime(m.created_at)}</td>
-          <td>${m.user_id !== currentUser?.id ? `<button class="btn btn-xs btn-danger" onclick="removeMember('${m.user_id}')">Remove</button>` : ''}</td>
-        </tr>
-      `).join('')}</tbody>
+          <td>${removeBtn}</td>
+        </tr>`;
+      }).join('')}</tbody>
     </table>`;
   } catch {}
 }
@@ -1095,6 +2487,19 @@ async function removeMember(userId) {
     toast('Member removed', 'success');
     loadTeam();
   } catch (e) { toast(e.message, 'error'); }
+}
+
+async function changeMemberRole(userId, role) {
+  try {
+    await apiFetch(`/projects/${currentProject.id}/members/${userId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ role }),
+    });
+    toast(`Role updated to ${role}`, 'success');
+  } catch (e) {
+    toast(e.message, 'error');
+    loadTeam(); // revert the dropdown on failure
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1142,25 +2547,72 @@ function confirmDeleteProject() {
     .catch(e => toast('Failed to delete: ' + e.message, 'error'));
 }
 
-// ---------------------------------------------------------------------------
-// AI tab switcher
-// ---------------------------------------------------------------------------
-function switchAiTab(name) {
-  ['analyze', 'filter', 'transform'].forEach(t => {
-    const panel = document.getElementById(`ai-tab-${t}`);
-    const tab   = document.querySelector(`.tab[data-tab="${t}"]`);
-    if (!panel || !tab) return;
-    const active = t === name;
-    panel.style.display = active ? 'grid' : 'none';
-    tab.classList.toggle('active', active);
-  });
+async function loadSigningSecrets() {
+  if (!currentProject) return;
+  const el = document.getElementById('signing-secrets-list');
+  if (!el) return;
+  try {
+    const secrets = await apiFetch(`/projects/${currentProject.id}/source-secrets`);
+    const entries = Object.entries(secrets);
+    if (!entries.length) {
+      el.innerHTML = `<div style="font-size:13px;color:var(--text3)">No signing secrets configured.</div>`;
+      return;
+    }
+    el.innerHTML = `<table style="width:100%;font-size:13px;border-collapse:collapse">
+      <thead><tr>
+        <th style="text-align:left;padding:6px 0;color:var(--text2);font-weight:500;border-bottom:1px solid var(--border)">Provider</th>
+        <th style="text-align:left;padding:6px 0;color:var(--text2);font-weight:500;border-bottom:1px solid var(--border)">Secret</th>
+        <th style="border-bottom:1px solid var(--border)"></th>
+      </tr></thead>
+      <tbody>${entries.map(([provider, info]) => `
+        <tr>
+          <td style="padding:8px 0;font-family:var(--mono);font-weight:500">${esc(provider)}</td>
+          <td style="padding:8px 0;font-family:var(--mono);color:var(--text3)">${esc(info.preview)}</td>
+          <td style="padding:8px 0;text-align:right">
+            <button class="btn btn-xs btn-danger" onclick="deleteSigningSecret('${esc(provider)}')">Remove</button>
+          </td>
+        </tr>
+      `).join('')}</tbody>
+    </table>`;
+  } catch (e) {
+    el.innerHTML = `<div style="font-size:13px;color:var(--danger)">${esc(e.message)}</div>`;
+  }
+}
+
+async function saveSigningSecret() {
+  if (!currentProject) return;
+  const provider = document.getElementById('signing-provider').value;
+  const secret = document.getElementById('signing-secret').value.trim();
+  if (!secret) { toast('Enter a secret value', 'error'); return; }
+  try {
+    await apiFetch(`/projects/${currentProject.id}/source-secrets/${provider}`, {
+      method: 'PUT',
+      body: JSON.stringify({ secret }),
+    });
+    document.getElementById('signing-secret').value = '';
+    toast(`${provider} secret saved`, 'success');
+    loadSigningSecrets();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteSigningSecret(provider) {
+  if (!currentProject) return;
+  if (!confirm(`Remove ${provider} signing secret?`)) return;
+  try {
+    await apiFetch(`/projects/${currentProject.id}/source-secrets/${provider}`, { method: 'DELETE' });
+    toast(`${provider} secret removed`, 'success');
+    loadSigningSecrets();
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 // ---------------------------------------------------------------------------
 // Modal helpers
 // ---------------------------------------------------------------------------
 function openModal(id) { document.getElementById(id).classList.add('open'); }
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function closeModal(id) {
+  document.getElementById(id).classList.remove('open');
+  if (id === 'modal-dest') _editingDestId = null;
+}
 
 // Close modal on overlay click
 document.querySelectorAll('.modal-overlay').forEach(overlay => {
@@ -1214,6 +2666,33 @@ function relTime(iso) {
 function toLocalDatetimeString(date) {
   const pad = n => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function _failureCategoryAdvice(cat) {
+  const advice = {
+    TIMEOUT:        'Destination took too long to respond. Check if the endpoint is under load or increase the timeout window.',
+    NETWORK:        'Could not reach the destination. Verify the URL is reachable and not behind a firewall.',
+    DNS:            'DNS lookup failed. Check the hostname in the destination URL is correct and resolving.',
+    SSL:            'SSL/TLS error. Ensure the destination has a valid certificate and is accepting HTTPS connections.',
+    SERVER_ERROR:   'Destination returned a 5xx error. The endpoint is running but throwing an internal error — check its logs.',
+    CLIENT_ERROR:   'Destination returned a 4xx error. The request format may be wrong — check your transform config or payload schema.',
+    AUTHENTICATION: 'Destination rejected the request as unauthorized. Verify the webhook secret or auth headers are correct.',
+    AUTHORIZATION:  'Destination returned 403 Forbidden. The signing credentials may be mismatched.',
+    RATE_LIMITING:  'Destination is rate-limiting Relora. Replay will respect Retry-After headers; consider reducing replay rate.',
+    CIRCUIT_BREAKER:'Circuit breaker was OPEN at delivery time — destination had too many recent failures. Wait for auto-recovery or reset it manually.',
+    TRANSFORM:      'Payload transform failed. Check your JavaScript transform or JSON field map for errors.',
+    FILTER:         'Event was filtered out by the destination\'s filter expression and was not delivered.',
+    CONFIGURATION:  'Destination is misconfigured. Review the URL, headers, and transform settings.',
+  };
+  return advice[cat] || '';
+}
+
+async function resetCircuitBreaker(destId) {
+  try {
+    await apiFetch(`/destinations/${destId}/reset-circuit`, { method: 'POST' });
+    toast('Circuit breaker reset — destination set to CLOSED', 'success');
+    await loadDestinations();
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 // ---------------------------------------------------------------------------
@@ -1335,104 +2814,6 @@ async function viewDestSla(id, name) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// AI Tools
-// ---------------------------------------------------------------------------
-async function aiAnalyze() {
-  const rawPayload = document.getElementById('ai-payload').value.trim();
-  if (!rawPayload) { toast('Paste a payload first', 'error'); return; }
-
-  let payload;
-  try { payload = JSON.parse(rawPayload); } catch { toast('Payload must be valid JSON', 'error'); return; }
-
-  const el = document.getElementById('ai-result');
-  el.innerHTML = `<div style="color:var(--text3)">🤖 Analyzing with Claude…</div>`;
-
-  try {
-    const r = await apiFetch('/ai/analyze-payload', { method: 'POST', body: JSON.stringify({ payload }) });
-    el.innerHTML = `
-      <div class="ai-result-section">
-        <div class="ai-chip provider">${esc(r.provider || 'unknown')}</div>
-        <div class="ai-chip confidence">confidence: ${((r.confidence || 0) * 100).toFixed(0)}%</div>
-        ${r.event_type ? `<div class="ai-chip event-type">${esc(r.event_type)}</div>` : ''}
-      </div>
-      ${r.schema_summary ? `<div class="ai-summary">${esc(r.schema_summary)}</div>` : ''}
-      ${r.filter_suggestions?.length ? `
-        <div class="ai-section-title">Suggested Filters</div>
-        ${r.filter_suggestions.map(f => `
-          <div class="ai-suggestion" onclick="copyToClipboard('${esc(f.expression)}')">
-            <div class="ai-expression">${esc(f.expression)}</div>
-            <div class="ai-desc">${esc(f.description)}</div>
-          </div>
-        `).join('')}
-      ` : ''}
-      ${r.field_mapping_suggestions?.length ? `
-        <div class="ai-section-title">Suggested Field Mappings</div>
-        <div class="json-view">${esc(JSON.stringify(
-          Object.fromEntries(r.field_mapping_suggestions.map(m => [m.to, m.from])),
-          null, 2
-        ))}</div>
-      ` : ''}
-      ${r.key_fields?.length ? `
-        <div class="ai-section-title">Key Fields</div>
-        <div>${r.key_fields.map(f => `<span class="inline-code">${esc(f)}</span>`).join(' ')}</div>
-      ` : ''}
-    `;
-  } catch (e) {
-    el.innerHTML = `<div style="color:var(--danger)">${esc(e.message)}</div>`;
-    if (e.message.includes('403') || e.message.includes('disabled')) {
-      el.innerHTML += `<div style="color:var(--text3);margin-top:8px;font-size:12px">Set <span class="inline-code">ENABLE_AI_FEATURES=true</span> and <span class="inline-code">ANTHROPIC_API_KEY</span> in your .env to enable AI features.</div>`;
-    }
-  }
-}
-
-async function aiSuggestFilter() {
-  const rawPayload = document.getElementById('ai-filter-payload').value.trim();
-  const description = document.getElementById('ai-filter-desc').value.trim();
-  if (!rawPayload || !description) { toast('Paste a payload and describe your filter', 'error'); return; }
-
-  let payload;
-  try { payload = JSON.parse(rawPayload); } catch { toast('Payload must be valid JSON', 'error'); return; }
-
-  const el = document.getElementById('ai-filter-result');
-  el.innerHTML = `<div style="color:var(--text3);font-size:12px">Generating…</div>`;
-
-  try {
-    const r = await apiFetch('/ai/suggest-filter', { method: 'POST', body: JSON.stringify({ sample_payload: payload, description }) });
-    el.innerHTML = `
-      <div style="font-size:12px;color:var(--text3);margin-bottom:6px">Generated expression:</div>
-      <div class="ai-suggestion" onclick="copyToClipboard('${esc(r.expression || r)}')">
-        <div class="ai-expression">${esc(r.expression || r)}</div>
-      </div>
-    `;
-  } catch (e) {
-    el.innerHTML = `<div style="color:var(--danger);font-size:12px">${esc(e.message)}</div>`;
-  }
-}
-
-async function aiSuggestTransform() {
-  const rawPayload = document.getElementById('ai-transform-payload').value.trim();
-  const description = document.getElementById('ai-transform-desc').value.trim();
-  if (!rawPayload || !description) { toast('Paste a payload and describe the output shape', 'error'); return; }
-
-  let payload;
-  try { payload = JSON.parse(rawPayload); } catch { toast('Payload must be valid JSON', 'error'); return; }
-
-  const el = document.getElementById('ai-transform-result');
-  el.innerHTML = `<div style="color:var(--text3);font-size:12px">Generating…</div>`;
-
-  try {
-    const r = await apiFetch('/ai/suggest-transform', { method: 'POST', body: JSON.stringify({ sample_payload: payload, description }) });
-    const code = r.transform_code || r;
-    el.innerHTML = `
-      <div style="font-size:12px;color:var(--text3);margin-bottom:6px">Generated transform:</div>
-      <div class="json-view" style="cursor:pointer" onclick="copyToClipboard(${JSON.stringify(code)})" title="Click to copy">${esc(code)}</div>
-      <div style="font-size:11px;color:var(--text3);margin-top:6px">Click to copy — paste into the JavaScript Transform field on a destination.</div>
-    `;
-  } catch (e) {
-    el.innerHTML = `<div style="color:var(--danger);font-size:12px">${esc(e.message)}</div>`;
-  }
-}
 
 function copyToClipboard(text) {
   navigator.clipboard.writeText(text).then(() => toast('Copied to clipboard', 'success'));
@@ -1727,22 +3108,24 @@ function updateRootCauses(rootCausesData) {
 function updateActiveIncidents(incidentsData) {
   const container = document.getElementById('active-incidents');
   const incidents = incidentsData.incidents || [];
-  
+
   const openIncidents = incidents.filter(i => i.state === 'OPEN' || i.state === 'INVESTIGATING');
-  
+
   if (openIncidents.length === 0) {
-    container.innerHTML = '<p style="color: #b2bec3; text-align: center;">No active incidents</p>';
+    container.innerHTML = '<div class="dlq-inv-empty">No active incidents — system is healthy</div>';
     return;
   }
-  
+
   container.innerHTML = openIncidents.slice(0, 10).map(incident => {
     const isCritical = incident.severity === 'critical';
     const timeAgo = getTimeAgo(incident.last_seen_at);
-    
+    const destId = incident.destination_id || '';
+    const destName = esc(incident.destination_name || incident.failure_category || 'destination');
+
     return `
       <div class="incident-item ${isCritical ? 'critical' : 'warning'}">
         <div class="incident-header">
-          <span class="incident-title">${incident.root_cause || incident.failure_category || 'Unknown'}</span>
+          <span class="incident-title">${esc(incident.root_cause || incident.failure_category || 'Unknown')}</span>
           <span class="incident-state ${incident.state}">${incident.state}</span>
         </div>
         <div class="incident-details">
@@ -1753,12 +3136,42 @@ function updateActiveIncidents(incidentsData) {
         </div>
         ${incident.recommended_action ? `
           <div class="incident-recommendation">
-            <strong>Recommendation:</strong> ${incident.recommended_action}
+            <strong>Recommendation:</strong> ${esc(incident.recommended_action)}
           </div>
         ` : ''}
+        <div class="incident-actions">
+          ${destId ? `<button class="btn btn-xs btn-primary" onclick="replayDLQForDestination('${destId}', '${destName}')">Replay →</button>` : ''}
+          <button class="btn btn-xs btn-secondary" onclick="resolveIncident('${incident.id}')">Mark resolved</button>
+        </div>
       </div>
     `;
   }).join('');
+}
+
+async function resolveIncident(incidentId) {
+  try {
+    await apiFetch(`/dlq/incidents/${incidentId}/resolve`, { method: 'PATCH' });
+    toast('Incident marked as resolved', 'success');
+    loadDLQIntelligence();
+  } catch (e) { toast(e.message || 'Failed to resolve incident', 'error'); }
+}
+
+async function replayDLQForDestination(destId, destName) {
+  const now = new Date();
+  const from = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  try {
+    await apiFetch('/webhooks/replay-window', {
+      method: 'POST',
+      body: JSON.stringify({
+        from_time: from.toISOString(),
+        to_time: now.toISOString(),
+        destination_id: destId,
+        replay_rate_per_minute: 60,
+      }),
+    });
+    toast(`Replay queued for ${destName}`, 'success');
+    loadDLQIntelligence();
+  } catch (e) { toast(e.message || 'Replay failed', 'error'); }
 }
 
 async function loadTopDestinations() {
@@ -1842,4 +3255,757 @@ function getTimeAgo(dateString) {
   if (diffHours < 24) return `${diffHours}h ago`;
   if (diffDays < 7) return `${diffDays}d ago`;
   return date.toLocaleDateString();
+}
+
+// ---------------------------------------------------------------------------
+// Recovery Center
+// ---------------------------------------------------------------------------
+let _recoveryTab = 'failures';
+
+async function loadRecovery() {
+  try {
+    const d = await apiFetch('/dashboard');
+    _renderRecoveryFailures(d.recent_failures || []);
+    _renderRecoveryIncidents(d.active_incidents || []);
+    _renderRecoveryDLQ(d.kpis || {});
+    _renderRecoveryReplays();
+  } catch (e) {
+    const el = document.getElementById('recovery-failures-body');
+    if (el) el.innerHTML = '<div style="padding:24px;color:var(--danger);font-size:13px">Failed to load recovery data</div>';
+  }
+}
+
+function switchRecoveryTab(tab) {
+  _recoveryTab = tab;
+  document.querySelectorAll('[data-rtab]').forEach(t => t.classList.toggle('active', t.dataset.rtab === tab));
+  document.querySelectorAll('.recovery-tab').forEach(t => { t.style.display = 'none'; });
+  const el = document.getElementById('recovery-' + tab);
+  if (el) el.style.display = '';
+}
+
+function _renderRecoveryFailures(failures) {
+  const el = document.getElementById('recovery-failures-body');
+  if (!el) return;
+  if (!failures.length) {
+    el.innerHTML = '<div class="empty-state"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg><div class="title">No recent failures</div><div class="desc">System is delivering cleanly</div></div>';
+    return;
+  }
+  const catColor = { TIMEOUT: 'var(--warn)', HTTP_ERROR: 'var(--danger)', CONNECTION_ERROR: 'var(--danger)', UNKNOWN: 'var(--text3)' };
+  const rows = failures.map(f => '<tr><td style="font-size:12px;color:var(--text3);font-family:var(--mono)">' + relTime(f.last_seen_at || f.created_at) + '</td><td style="font-size:13px">' + esc(f.destination_name || '—') + '</td><td><span style="font-family:var(--mono);font-size:11px;color:' + (catColor[f.category] || 'var(--text3)') + '">' + esc(f.category || 'UNKNOWN') + '</span></td><td><button class="btn btn-xs btn-secondary" onclick="navTo(\'dlq-intelligence\')">Investigate</button></td></tr>').join('');
+  el.innerHTML = '<table><thead><tr><th>Time</th><th>Destination</th><th>Category</th><th style="width:100px"></th></tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+function _renderRecoveryIncidents(incidents) {
+  const el = document.getElementById('recovery-incidents-body');
+  if (!el) return;
+  if (!incidents.length) {
+    el.innerHTML = '<div class="empty-state"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg><div class="title">No active incidents</div><div class="desc">System is healthy</div></div>';
+    return;
+  }
+  const sevColor = { critical: 'var(--danger)', high: 'var(--warn)', medium: 'var(--info)', low: 'var(--text3)' };
+  const rows = incidents.map(i => '<tr><td><span style="font-family:var(--mono);font-size:10px;color:' + (sevColor[i.severity] || 'var(--text3)') + '">' + esc((i.severity || 'low').toUpperCase()) + '</span></td><td style="font-size:12px">' + esc(i.category || '—') + (i.subcategory ? ' · ' + esc(i.subcategory) : '') + '</td><td style="font-size:12px;color:var(--text2)">' + esc(i.destination_name || '—') + '</td><td style="font-family:var(--mono);font-size:12px">' + (i.affected_count || 0) + '</td><td><span class="badge ' + (i.state === 'OPEN' ? 'failed' : 'pending') + '">' + esc(i.state || '—') + '</span></td><td><button class="btn btn-xs btn-secondary" onclick="navTo(\'dlq-intelligence\')">View</button></td></tr>').join('');
+  el.innerHTML = '<table><thead><tr><th>Severity</th><th>Category</th><th>Destination</th><th>Affected</th><th>State</th><th style="width:56px"></th></tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+function _renderRecoveryDLQ(kpis) {
+  const el = document.getElementById('recovery-dlq-body');
+  if (!el) return;
+  const dlq = kpis.dlq_depth || 0;
+  if (dlq === 0) {
+    el.innerHTML = '<div class="empty-state"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg><div class="title">DLQ is empty</div><div class="desc">All events delivered successfully</div></div>';
+    return;
+  }
+  el.innerHTML = '<div style="padding:20px;border:1px solid rgba(224,82,82,.2);background:rgba(224,82,82,.04);margin-bottom:16px"><div style="display:flex;align-items:center;gap:16px"><div style="font-family:var(--mono);font-size:32px;font-weight:500;color:var(--danger)">' + dlq + '</div><div><div style="font-weight:600;color:var(--text);margin-bottom:4px">Events in Dead Letter Queue</div><div style="font-size:12px;color:var(--text3)">These events failed all retry attempts and require manual intervention.</div></div><button class="btn btn-primary" style="margin-left:auto" onclick="navTo(\'replay\')">Replay all →</button></div></div><div style="font-size:12px;color:var(--text3);padding:8px 0">Use Bulk Replay to re-attempt delivery, or navigate to DLQ Intelligence for root cause analysis.</div>';
+}
+
+async function _renderRecoveryReplays() {
+  const el = document.getElementById('recovery-replays-body');
+  if (!el) return;
+  try {
+    const data = await apiFetch('/webhooks/replay-jobs?limit=20');
+    const jobs = (data && data.jobs) ? data.jobs : (Array.isArray(data) ? data : []);
+    if (!jobs.length) {
+      el.innerHTML = '<div class="empty-state"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg><div class="title">No replay history</div><div class="desc">Bulk replay jobs appear here after execution</div></div>';
+      return;
+    }
+    const rows = jobs.map(j => '<tr><td style="font-size:12px;color:var(--text3);font-family:var(--mono)">' + relTime(j.created_at) + '</td><td><span class="badge ' + (j.status === 'completed' ? 'completed' : j.status === 'running' ? 'processing' : 'pending') + '">' + esc(j.status || '—') + '</span></td><td style="font-family:var(--mono);font-size:12px">' + (j.total_events != null ? j.total_events : '—') + '</td><td style="font-family:var(--mono);font-size:12px;color:var(--success)">' + (j.delivered_count != null ? j.delivered_count : '—') + '</td><td style="font-family:var(--mono);font-size:12px;color:' + (j.failed_count > 0 ? 'var(--danger)' : 'var(--text3)') + '">' + (j.failed_count != null ? j.failed_count : '—') + '</td></tr>').join('');
+    el.innerHTML = '<table><thead><tr><th>Started</th><th>Status</th><th>Events</th><th>Delivered</th><th>Failed</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  } catch (e) {
+    el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text3);font-size:13px">Replay history unavailable</div>';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pipeline page
+// ---------------------------------------------------------------------------
+let _pipeDestCache = {};
+let _pipeActiveDest = null;
+
+async function loadPipeline() {
+  _pipeDestCache = {};
+  _pipeActiveDest = null;
+  try {
+    const [d, sys] = await Promise.all([
+      apiFetch('/dashboard'),
+      fetch('/health/detailed', { credentials: 'include' }).then(r => r.ok ? r.json() : {}),
+    ]);
+    const kpis   = d.kpis || {};
+    const worker = sys.checks?.worker || {};
+    const queue  = sys.checks?.queue  || {};
+
+    function set(id, v, color) {
+      const e = document.getElementById(id);
+      if (!e) return;
+      e.textContent = v;
+      e.style.color = color || '';
+    }
+
+    const qDepth  = queue.depth ?? 0;
+    const dlqDepth = kpis.dlq_depth ?? 0;
+
+    set('pipe-receive',      kpis.total_24h     != null ? kpis.total_24h.toLocaleString()     : '—');
+    set('pipe-persist',      kpis.total_24h     != null ? kpis.total_24h.toLocaleString()     : '—');
+    set('pipe-relay',        kpis.delivered_24h != null ? kpis.delivered_24h.toLocaleString() : '—');
+    set('pipe-retry',        qDepth.toLocaleString(),   qDepth > 0   ? 'var(--warn)'   : '');
+    set('pipe-dlq',          dlqDepth.toLocaleString(), dlqDepth > 0 ? 'var(--danger)' : '');
+    set('pipe-replay-count', '—');
+
+    // Ingest card
+    const workerOk = worker.status === 'ok';
+    set('pipe-worker-status', workerOk ? 'Online' : 'Stalled', workerOk ? 'var(--success)' : 'var(--danger)');
+    set('pipe-queue-depth',   qDepth.toLocaleString());
+    const rate = kpis.success_rate_24h;
+    const rateColor = rate >= 99 ? 'var(--success)' : rate >= 95 ? 'var(--warn)' : 'var(--danger)';
+    set('pipe-success-rate',  rate != null ? rate.toFixed(1) + '%' : '—', rate != null ? rateColor : '');
+    set('pipe-p95',           kpis.p95_latency_ms ? kpis.p95_latency_ms + ' ms' : '—');
+
+    // Failure pressure card
+    const cb = kpis.circuit_breakers ? (kpis.circuit_breakers.open || 0) + (kpis.circuit_breakers.half_open || 0) : 0;
+    set('pipe-dlq-detail',   dlqDepth.toLocaleString(),                      dlqDepth > 0 ? 'var(--danger)' : '');
+    set('pipe-cb-detail',    cb.toLocaleString(),                             cb > 0        ? 'var(--danger)' : '');
+    set('pipe-inc-detail',   (d.active_incidents || []).filter(i => i.state === 'OPEN').length.toLocaleString());
+    set('pipe-stuck-detail', (worker.stuck_jobs || 0).toLocaleString(),      worker.stuck_jobs > 0 ? 'var(--warn)' : '');
+
+    // Destinations mini-list in stats card
+    const destEl = document.getElementById('pipe-dest-list');
+    if (destEl && destinations.length) {
+      destEl.innerHTML = destinations.slice(0, 8).map(dest => {
+        const color = dest.circuit_state === 'closed' ? 'var(--success)' : 'var(--danger)';
+        return `<div class="kv-row">
+          <span class="kv-key" style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(dest.name || dest.url)}</span>
+          <span class="kv-val" style="color:${color};font-family:var(--mono);font-size:11px">${(dest.circuit_state || '—').toUpperCase()}</span>
+        </div>`;
+      }).join('');
+    }
+
+    // Destination performance section
+    const destSection = document.getElementById('pipe-dest-section');
+    if (destSection) {
+      if (destinations.length > 0) {
+        destSection.style.display = '';
+        _renderPipeDestTabs();
+      } else {
+        destSection.style.display = 'none';
+      }
+    }
+  } catch (e) {}
+}
+
+function _renderPipeDestTabs() {
+  const tabs = document.getElementById('pipe-dest-tabs');
+  if (!tabs) return;
+  tabs.innerHTML = destinations.map((d, i) =>
+    `<div class="tab${i === 0 ? ' active' : ''}" onclick="switchPipeDest('${d.id}',this)">${esc(d.name || _shortUrl(d.url))}</div>`
+  ).join('');
+  if (destinations.length > 0) {
+    switchPipeDest(destinations[0].id, tabs.querySelector('.tab'));
+  }
+}
+
+async function switchPipeDest(id, tabEl) {
+  if (tabEl) {
+    document.querySelectorAll('#pipe-dest-tabs .tab').forEach(t => t.classList.toggle('active', t === tabEl));
+  }
+  _pipeActiveDest = id;
+  const content = document.getElementById('pipe-dest-content');
+  if (!content) return;
+
+  content.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text3);font-size:13px">Loading…</div>';
+  const dest = destinations.find(d => d.id === id);
+
+  const [statsResult, webhooksResult] = await Promise.allSettled([
+    apiFetch(`/destinations/${id}/stats`),
+    apiFetch(`/webhooks?destination_id=${id}&limit=28&page=1`),
+  ]);
+
+  if (_pipeActiveDest !== id) return;
+
+  const stats    = statsResult.status    === 'fulfilled' ? statsResult.value              : null;
+  const webhooks = webhooksResult.status === 'fulfilled' ? (webhooksResult.value?.webhooks || []) : [];
+
+  _renderPipeDestView(stats, dest, webhooks);
+}
+
+function _buildDeliveryTrail(webhooks) {
+  if (!webhooks || !webhooks.length) {
+    return '<span class="pipe-dest-trail-empty">No deliveries recorded yet</span>';
+  }
+  return webhooks.map(w => {
+    const cls   = w.status === 'completed' ? 'ok' : w.status === 'failed' ? 'fail' : 'pend';
+    const label = `${w.status} · ${relTime(w.updated_at || w.created_at)}`;
+    return `<div class="pipe-dest-trail-dot pipe-dest-trail-dot--${cls}" title="${esc(label)}"></div>`;
+  }).join('');
+}
+
+function _renderPipeDestView(stats, dest, webhooks) {
+  const content = document.getElementById('pipe-dest-content');
+  if (!content || !dest) return;
+
+  const rate    = stats ? (stats.success_rate ?? stats.delivery_rate ?? null) : null;
+  const pct     = rate != null ? Math.round(rate * 100) / 100 : null;
+  const rateCls = pct == null ? '' : pct >= 99 ? 'pipe-dest-rate--good' : pct >= 95 ? 'pipe-dest-rate--warn' : 'pipe-dest-rate--bad';
+  const rateStr = pct != null ? pct.toFixed(1) + '%' : '—';
+  const barW    = pct != null ? Math.min(pct, 100) : 0;
+  const barCol  = pct >= 99 ? '#00D47E' : pct >= 95 ? '#E8A838' : '#E05252';
+
+  const circuit      = dest.circuit_state || 'closed';
+  const circuitLabel = circuit === 'closed' ? 'Circuit closed' : circuit === 'half_open' ? 'Half open — recovering' : 'Circuit open — suspended';
+  const circuitColor = circuit === 'closed' ? '#00D47E' : circuit === 'half_open' ? '#E8A838' : '#E05252';
+
+  const delivered = stats?.delivered_24h ?? stats?.total_delivered ?? null;
+  const failed    = stats?.failed_24h    ?? stats?.total_failed    ?? null;
+
+  const trailHtml = _buildDeliveryTrail(webhooks);
+
+  content.innerHTML = `
+    <div class="pipe-dest-card">
+
+      <!-- Delivery trail — most recent at left -->
+      <div class="pipe-dest-trail-hdr">Last ${webhooks.length || 0} deliveries</div>
+      <div class="pipe-dest-trail">${trailHtml}</div>
+
+      <!-- Rate + metrics -->
+      <div class="pipe-dest-view">
+        <div>
+          <div class="pipe-dest-rate ${rateCls}">${rateStr}</div>
+          <div class="pipe-dest-rate-label">success rate · 7 days</div>
+          <div class="pipe-dest-hbar-wrap">
+            <div class="pipe-dest-hbar" style="width:${barW}%;background:${barCol}"></div>
+          </div>
+          <div class="pipe-dest-circuit">
+            <div class="pipe-dest-circuit-dot" style="background:${circuitColor}"></div>
+            <span>${esc(circuitLabel)}</span>
+          </div>
+          ${dest.is_enabled === false ? '<div style="margin-top:6px;font-size:10px;color:var(--text3)">Destination disabled</div>' : ''}
+        </div>
+
+        <div class="kv-list" style="border:none;padding:0">
+          ${delivered != null ? `<div class="kv-row"><span class="kv-key">Delivered 24h</span><span class="kv-val" style="color:var(--success)">${Number(delivered).toLocaleString()}</span></div>` : ''}
+          ${failed    != null ? `<div class="kv-row"><span class="kv-key">Failed 24h</span><span class="kv-val"${failed > 0 ? ' style="color:var(--danger)"' : ''}>${Number(failed).toLocaleString()}</span></div>` : ''}
+          ${stats?.p95_latency_ms  != null ? `<div class="kv-row"><span class="kv-key">P95 latency</span><span class="kv-val">${stats.p95_latency_ms} ms</span></div>` : ''}
+          ${stats?.retry_count_24h != null ? `<div class="kv-row"><span class="kv-key">Retries 24h</span><span class="kv-val">${Number(stats.retry_count_24h).toLocaleString()}</span></div>` : ''}
+          <div class="kv-row"><span class="kv-key">Max retries</span><span class="kv-val">${dest.max_retries ?? '—'}</span></div>
+          <div class="kv-row">
+            <span class="kv-key">Endpoint</span>
+            <span class="kv-val" style="font-size:11px;font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px" title="${esc(dest.url)}">${esc(_shortUrl(dest.url))}</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:16px;padding-top:14px;border-top:1px solid #1C2A3A;display:flex;gap:8px">
+        <button class="btn btn-secondary btn-sm" onclick="viewDestSla('${dest.id}','${esc(dest.name || '')}')">View SLA →</button>
+        <button class="btn btn-secondary btn-sm" onclick="navTo('analytics')">Analytics →</button>
+        <button class="btn btn-secondary btn-sm" onclick="navTo('destinations')">Manage →</button>
+      </div>
+    </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Timeline
+// ---------------------------------------------------------------------------
+var _tlFilter = 'all';
+var _tlEntries = [];
+var _tlOffset = 0;
+var TL_LIMIT = 50;
+
+var _tlTypeMap = {
+  destination: 'config', alert_config: 'config', project: 'config',
+  api_key: 'config', team_member: 'config', settings: 'config',
+  webhook: 'delivery', replay_job: 'replay'
+};
+
+var _tlIcon = {
+  delivery: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 2L11 13"/><path d="M22 2L15 22l-4-9-9-4 20-7z"/></svg>',
+  incident: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>',
+  config:   '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/></svg>',
+  replay:   '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>'
+};
+
+var _tlColor = { delivery: 'var(--success)', incident: 'var(--danger)', config: 'var(--text3)', replay: 'var(--info)' };
+
+async function loadTimeline(offset) {
+  if (offset == null) offset = 0;
+  _tlOffset = offset;
+  const body = document.getElementById('timeline-body');
+  const pag  = document.getElementById('timeline-pagination');
+  if (!body) return;
+  body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text3);font-size:13px">Loading…</div>';
+  try {
+    const data = await apiFetch('/audit-log?limit=' + TL_LIMIT + '&offset=' + offset);
+    _tlEntries = (data.entries || []).map(function(e) {
+      return Object.assign({}, e, { _tltype: _tlTypeMap[e.resource_type] || 'config' });
+    });
+    _renderTimeline();
+    if (pag) {
+      const hasPrev = offset > 0;
+      const hasNext = _tlEntries.length === TL_LIMIT;
+      pag.innerHTML = (hasPrev || hasNext) ? '<button class="btn btn-secondary btn-sm" onclick="loadTimeline(' + (offset - TL_LIMIT) + ')" ' + (hasPrev ? '' : 'disabled') + '>← Prev</button><span style="font-size:12px;color:var(--text3);padding:0 12px">' + (offset + 1) + '–' + (offset + _tlEntries.length) + '</span><button class="btn btn-secondary btn-sm" onclick="loadTimeline(' + (offset + TL_LIMIT) + ')" ' + (hasNext ? '' : 'disabled') + '>Next →</button>' : '';
+    }
+  } catch (e) {
+    body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text3);font-size:13px">Timeline unavailable</div>';
+  }
+}
+
+function filterTimeline(btn, filter) {
+  _tlFilter = filter;
+  document.querySelectorAll('.tl-filter').forEach(function(b) { b.classList.toggle('active', b === btn); });
+  _renderTimeline();
+}
+
+function _renderTimeline() {
+  const body = document.getElementById('timeline-body');
+  if (!body) return;
+  const entries = _tlFilter === 'all' ? _tlEntries : _tlEntries.filter(function(e) { return e._tltype === _tlFilter; });
+  if (!entries.length) {
+    body.innerHTML = '<div class="empty-state"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg><div class="title">No entries</div><div class="desc">No ' + (_tlFilter === 'all' ? '' : _tlFilter + ' ') + 'events recorded yet</div></div>';
+    return;
+  }
+  var lastDate = '';
+  var resourceLabel = { destination: 'Destination', alert_config: 'Alert', webhook: 'Webhook', project: 'Project', replay_job: 'Replay', api_key: 'API Key', team_member: 'Team Member' };
+  body.innerHTML = entries.map(function(e) {
+    const d = new Date(e.created_at);
+    const dateStr = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    const timeStr = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    var dateSep = '';
+    if (dateStr !== lastDate) { dateSep = '<div class="tl-date-sep">' + dateStr + '</div>'; lastDate = dateStr; }
+    const type  = e._tltype;
+    const color = _tlColor[type] || 'var(--text3)';
+    const icon  = _tlIcon[type] || _tlIcon.config;
+    const changes = e.changes || {};
+    const detail = (changes.after && changes.after.name) || (changes.before && changes.before.name) || (changes.after && changes.after.url && changes.after.url.substring(0, 40)) || (e.resource_id ? e.resource_id.substring(0, 20) + '…' : '');
+    return dateSep + '<div class="tl-row" data-tltype="' + esc(e._tltype) + '"><div class="tl-time">' + timeStr + '</div><div class="tl-dot" style="background:' + color + '">' + icon + '</div><div class="tl-content"><span class="tl-action" style="color:' + color + '">' + esc(e.action || '—') + '</span><span class="tl-resource">' + esc(resourceLabel[e.resource_type] || e.resource_type || '—') + '</span>' + (detail ? '<span class="tl-detail">' + esc(detail) + '</span>' : '') + '</div>' + (e.ip_address ? '<div class="tl-ip">' + esc(e.ip_address) + '</div>' : '') + '</div>';
+  }).join('');
+}
+
+// ---------------------------------------------------------------------------
+// Insights — Weekly Reliability Briefing
+// ---------------------------------------------------------------------------
+let _insightReport = null;
+let _insightMessages = [];
+
+function switchInsightTab(tab) {
+  ['this-week', 'archive'].forEach(t => {
+    document.getElementById('ins-tab-' + t).classList.toggle('active', t === tab);
+    document.getElementById('ins-panel-' + t).style.display = t === tab ? '' : 'none';
+  });
+  document.getElementById('ins-generate-btn').style.display = tab === 'this-week' ? '' : 'none';
+  if (tab === 'archive') _loadInsightArchive();
+}
+
+async function loadInsights() {
+  switchInsightTab('this-week');
+  _showInsLoading(true);
+  try {
+    const r = await apiFetch('/insights/reports/current');
+    _insightReport = r;
+    _insightMessages = [];
+    _renderInsightReport(r);
+  } catch (e) {
+    toast('Failed to load weekly report: ' + e.message, 'error');
+    _showInsLoading(false);
+  }
+}
+
+async function insightForceGenerate() {
+  const btn = document.getElementById('ins-generate-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Generating…'; }
+  _showInsLoading(true);
+  try {
+    const r = await apiFetch('/insights/generate', { method: 'POST' });
+    _insightReport = r;
+    _insightMessages = [];
+    _renderInsightReport(r);
+    toast('Report regenerated', 'success');
+  } catch (e) {
+    toast('Failed to regenerate: ' + e.message, 'error');
+    _showInsLoading(false);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg> Regenerate';
+    }
+  }
+}
+
+function _showInsLoading(on) {
+  const loading = document.getElementById('ins-loading');
+  const report  = document.getElementById('ins-report');
+  if (loading) loading.style.display = on ? '' : 'none';
+  if (report)  report.style.display  = on ? 'none' : '';
+}
+
+function _insGradeColor(grade) {
+  if (!grade) return 'neutral';
+  const g = grade[0];
+  if (g === 'A') return 'success';
+  if (g === 'B') return 'info';
+  if (g === 'C') return 'warn';
+  return 'danger';
+}
+
+function _buildRuleBasedBriefing(r) {
+  const data       = r.report_data || {};
+  const overview   = data.overview || {};
+  const replay     = data.replay   || {};
+  const incidents  = data.incidents || {};
+  const whatChanged = data.what_changed || [];
+
+  const score    = r.reliability_score ?? 100;
+  const grade    = r.grade || '—';
+  const delta    = r.score_delta;
+  const total    = overview.total_deliveries  || 0;
+  const failed   = overview.failed_deliveries || 0;
+  const recovered = replay.events_recovered   || 0;
+
+  const parts = [];
+
+  let lead = `${score.toFixed(1)}% reliability this week (Grade ${grade})`;
+  if (delta !== null && delta !== undefined) {
+    const dir = delta >= 0 ? 'up' : 'down';
+    lead += `, ${Math.abs(delta).toFixed(1)}% ${dir} from last week`;
+  }
+  parts.push(lead + '.');
+
+  if (total > 0) {
+    if (failed > 0) {
+      parts.push(`${total.toLocaleString()} deliveries attempted — ${failed.toLocaleString()} failed.`);
+    } else {
+      parts.push(`${total.toLocaleString()} deliveries completed with no failures.`);
+    }
+  }
+
+  const incOpened = incidents.opened || 0;
+  if (incOpened > 0) {
+    parts.push(`${incOpened} incident${incOpened > 1 ? 's' : ''} opened this week.`);
+  }
+
+  if (recovered > 0) {
+    parts.push(`${recovered.toLocaleString()} failed deliveries recovered via replay.`);
+  }
+
+  const topItem = whatChanged.find(i => i.type !== 'stable' && i.explanation);
+  if (topItem) parts.push(topItem.explanation);
+
+  return parts.join(' ');
+}
+
+function _renderInsightReport(r) {
+  _showInsLoading(false);
+  const data         = r.report_data  || {};
+  const overview     = data.overview  || {};
+  const streaks      = data.streaks   || {};
+  const replay       = data.replay    || {};
+  const destinations = data.destinations || {};
+  const whatChanged  = data.what_changed || [];
+  const recs         = data.recommendations || [];
+  const incidents    = data.incidents || {};
+
+  const ws      = new Date(r.week_start);
+  const we      = new Date(r.week_end);
+  const weekEnd = new Date(we.getTime() - 86400000);
+  const weekLabel = ws.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' – ' +
+    weekEnd.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+
+  const grade = r.grade || '—';
+  const score = r.reliability_score ?? 100;
+  const delta = r.score_delta;
+
+  const deltaHtml = (delta === null || delta === undefined) ? '' :
+    `<span class="ins-cover-delta ins-delta-${delta >= 0 ? 'up' : 'down'}">${delta >= 0 ? '▲' : '▼'} ${Math.abs(delta).toFixed(1)}%</span>`;
+
+  const total    = (overview.total_deliveries  || 0).toLocaleString();
+  const failed   = (overview.failed_deliveries || 0).toLocaleString();
+  const incCount = incidents.opened || 0;
+  const p95      = overview.p95_latency_ms ? overview.p95_latency_ms + 'ms' : '—';
+
+  const briefingText = r.ai_summary || _buildRuleBasedBriefing(r);
+  const aiHtml = `<div class="ins-briefing-text">${esc(briefingText)}</div>`;
+
+  const topSuccesses  = destinations.top_successes  || [];
+  const biggestIssues = destinations.biggest_issues || [];
+  const destHtml = (topSuccesses.length || biggestIssues.length) ? `
+    <div class="ins-section">
+      <div class="ins-section-hdr">Destination Highlights</div>
+      <div class="ins-dest-grid">
+        <div class="ins-dest-col">
+          <div class="ins-dest-col-lbl">Top Performers</div>
+          ${topSuccesses.length ? topSuccesses.map(d => _insDestRow(d, 'success')).join('') : '<div class="ins-empty-inline">No active destinations.</div>'}
+        </div>
+        <div class="ins-dest-col">
+          <div class="ins-dest-col-lbl">Needs Attention</div>
+          ${biggestIssues.length ? biggestIssues.map(d => _insDestRow(d, 'issue')).join('') : '<div class="ins-empty-inline">No issues this week.</div>'}
+        </div>
+      </div>
+    </div>` : '';
+
+  document.getElementById('ins-report').innerHTML = `
+    <div class="ins-cover">
+      <div class="ins-cover-left">
+        <div class="ins-cover-week">${esc(weekLabel)}</div>
+        <div class="ins-cover-title">Weekly Reliability Briefing</div>
+        <div class="ins-cover-score-row">
+          <span class="ins-cover-score">${score.toFixed(1)}%</span>
+          ${deltaHtml}
+        </div>
+      </div>
+      <div class="ins-cover-right">
+        <div class="ins-grade-badge ins-grade-${_insGradeColor(grade)}">${esc(grade)}</div>
+      </div>
+    </div>
+
+    <div class="ins-briefing">
+      <div class="ins-briefing-eyebrow">Executive Briefing</div>
+      ${aiHtml}
+    </div>
+
+    <div class="ins-stats-row">
+      <span class="ins-stat"><strong>${total}</strong> deliveries</span>
+      <span class="ins-stat-sep">·</span>
+      <span class="ins-stat"${overview.failed_deliveries ? ' style="color:var(--danger)"' : ''}><strong>${failed}</strong> failures</span>
+      <span class="ins-stat-sep">·</span>
+      <span class="ins-stat"><strong>${incCount}</strong> incident${incCount === 1 ? '' : 's'}</span>
+      <span class="ins-stat-sep">·</span>
+      <span class="ins-stat">p95 <strong>${p95}</strong></span>
+    </div>
+
+    <div class="ins-section">
+      <div class="ins-section-hdr">What Changed</div>
+      ${_buildChangesHtml(whatChanged)}
+    </div>
+
+    ${_buildStreaksHtml(streaks)}
+    ${_buildReplayHtml(replay, score)}
+    ${destHtml}
+    ${_buildRecsHtml(recs)}
+
+    ${r.ai_summary ? `<div class="ins-section ins-qa-section">
+      <div class="ins-section-hdr">Ask About This Week</div>
+      <div class="ins-qa-chips">
+        ${['Why did my grade change?', 'What caused reliability issues?', 'Which destination needs attention?', 'What improved most?', 'What should I prioritize next week?']
+          .map(q => `<button class="ins-qa-chip" onclick="askInsightPreset(${JSON.stringify(q)})">${esc(q)}</button>`)
+          .join('')}
+      </div>
+      <div class="ins-chat-messages" id="ins-chat-messages"></div>
+      <div class="ins-chat-input-row">
+        <input class="ins-chat-input" id="ins-chat-input" type="text" placeholder="Ask a question about this report…" onkeydown="if(event.key==='Enter')sendInsightQuestion()">
+        <button class="btn btn-primary btn-sm" onclick="sendInsightQuestion()">Ask</button>
+      </div>
+    </div>` : ''}
+  `;
+}
+
+function _buildChangesHtml(whatChanged) {
+  const typeLabel = {
+    reliability_shift: 'RELIABILITY',
+    latency_shift:     'LATENCY',
+    incident:          'INCIDENT',
+    resolved:          'RESOLVED',
+    replay:            'REPLAY',
+    schema_drift:      'SCHEMA',
+    new_destination:   'DESTINATION',
+    stable:            'STABLE',
+  };
+  if (!whatChanged.length) return '<div class="ins-empty-inline">No significant changes this week.</div>';
+  return whatChanged.map(item => {
+    const badge  = typeLabel[item.type] || item.type.toUpperCase().replace(/_/g, ' ');
+    const impact = item.impact || 'neutral';
+    return `<div class="ins-change-item ins-change-${impact}">
+      <div class="ins-change-head">
+        <span class="ins-change-badge ins-badge-${impact}">${badge}</span>
+        <span class="ins-change-headline">${esc(item.headline)}</span>
+      </div>
+      ${item.explanation ? `<div class="ins-change-explanation">${esc(item.explanation)}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function _buildStreaksHtml(streaks) {
+  const curDays     = streaks.current_days;
+  const longestDays = streaks.longest_days;
+  const bestWeek    = streaks.best_week;
+
+  const curVal  = (curDays === null || curDays === undefined) ? 'All time' : curDays + ' days';
+  const curSub  = streaks.streak_label || 'No critical incidents on record';
+  const longVal = (longestDays !== null && longestDays !== undefined) ? longestDays + ' days' : '—';
+  const bestVal = bestWeek ? bestWeek.score.toFixed(1) + '%' : '—';
+  const bestSub = bestWeek ? (bestWeek.week_label || '') : 'No archived reports yet';
+
+  return `<div class="ins-section">
+    <div class="ins-section-hdr">Reliability Streaks &amp; Records</div>
+    <div class="ins-streaks-grid">
+      <div class="ins-streak-card">
+        <div class="ins-streak-val">${esc(curVal)}</div>
+        <div class="ins-streak-lbl">Current Streak</div>
+        <div class="ins-streak-sub">${esc(curSub)}</div>
+      </div>
+      <div class="ins-streak-card">
+        <div class="ins-streak-val">${esc(longVal)}</div>
+        <div class="ins-streak-lbl">Longest Ever</div>
+        <div class="ins-streak-sub">All-time best streak</div>
+      </div>
+      <div class="ins-streak-card">
+        <div class="ins-streak-val">${esc(bestVal)}</div>
+        <div class="ins-streak-lbl">Best Week Ever</div>
+        <div class="ins-streak-sub">${esc(bestSub)}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function _buildReplayHtml(replay, currentScore) {
+  const recovered = replay.events_recovered || 0;
+  if (!recovered) return '';
+  const rateWithout = replay.rate_without_replay;
+  const savedPts    = (rateWithout !== null && rateWithout !== undefined)
+    ? (currentScore - rateWithout).toFixed(1) : null;
+  const subText = savedPts !== null
+    ? `Without replay, reliability would have been ${replay.rate_without_replay.toFixed(1)}% — <strong>${savedPts} points lower</strong>.`
+    : `Replay jobs re-delivered ${recovered.toLocaleString()} events that had previously failed.`;
+  return `<div class="ins-section">
+    <div class="ins-section-hdr">Replay Impact</div>
+    <div class="ins-replay-hero">
+      <div class="ins-replay-number">${recovered.toLocaleString()}</div>
+      <div class="ins-replay-desc">
+        <div class="ins-replay-label">Deliveries Recovered</div>
+        <div class="ins-replay-sub">${subText}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function _insDestRow(d, type) {
+  const sr    = (d.success_rate ?? 100).toFixed(1);
+  const color = type === 'success' ? 'var(--success)' : 'var(--danger)';
+  const total = (d.total || 0).toLocaleString();
+  const sub   = (type === 'issue' && d.failed)
+    ? d.failed.toLocaleString() + ' failures'
+    : total + ' deliveries';
+  return `<div class="ins-dest-row">
+    <div class="ins-dest-info">
+      <div class="ins-dest-name">${esc(d.name)}</div>
+      <div class="ins-dest-sub">${sub}</div>
+    </div>
+    <div class="ins-dest-rate" style="color:${color}">${sr}%</div>
+  </div>`;
+}
+
+function _buildRecsHtml(recs) {
+  if (!recs.length) return '';
+  const badge = { high: 'HIGH', medium: 'MEDIUM', low: 'LOW' };
+  const cls   = { high: 'rec-high', medium: 'rec-medium', low: 'rec-low' };
+  return `<div class="ins-section">
+    <div class="ins-section-hdr">Recommendations</div>
+    ${recs.map(r => `<div class="ins-rec">
+      <div class="ins-rec-head">
+        <span class="ins-rec-badge ${cls[r.priority] || ''}">${badge[r.priority] || r.priority.toUpperCase()}</span>
+        <span class="ins-rec-title">${esc(r.title)}</span>
+      </div>
+      <div class="ins-rec-body">${esc(r.body)}</div>
+    </div>`).join('')}
+  </div>`;
+}
+
+async function _loadInsightArchive() {
+  const el = document.getElementById('ins-archive-list');
+  if (!el) return;
+  el.innerHTML = '<div class="ins-empty-state" style="padding:40px 0"><div style="color:var(--text3);font-size:13px">Loading archive…</div></div>';
+  try {
+    const reports = await apiFetch('/insights/reports');
+    if (!reports.length) {
+      el.innerHTML = '<div class="ins-empty-state" style="padding:40px 0"><div style="color:var(--text3);font-size:13px">No archived reports yet. Reports are generated automatically each week.</div></div>';
+      return;
+    }
+    el.innerHTML = reports.map(r => {
+      const ws      = new Date(r.week_start);
+      const we      = new Date(r.week_end);
+      const weekEnd = new Date(we.getTime() - 86400000);
+      const lbl     = ws.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' – ' +
+        weekEnd.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+      const delta   = r.score_delta;
+      const deltaHtml = (delta === null || delta === undefined) ? '' :
+        `<span class="ins-archive-delta ins-delta-${delta >= 0 ? 'up' : 'down'}">${delta >= 0 ? '▲' : '▼'} ${Math.abs(delta).toFixed(1)}%</span>`;
+      return `<div class="ins-archive-row" onclick="loadInsightArchiveReport('${r.id}')">
+        <div class="ins-archive-week">${esc(lbl)}</div>
+        <div class="ins-archive-meta">
+          <span class="ins-grade-badge ins-grade-${_insGradeColor(r.grade)} ins-grade-sm">${esc(r.grade)}</span>
+          <span class="ins-archive-score">${r.reliability_score.toFixed(1)}%</span>
+          ${deltaHtml}
+        </div>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text3)"><polyline points="9 18 15 12 9 6"/></svg>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    el.innerHTML = '<div class="ins-empty-state" style="padding:40px 0"><div style="color:var(--danger);font-size:13px">Failed to load archive.</div></div>';
+  }
+}
+
+async function loadInsightArchiveReport(id) {
+  switchInsightTab('this-week');
+  _showInsLoading(true);
+  try {
+    const r = await apiFetch('/insights/reports/' + id);
+    _insightReport = r;
+    _insightMessages = [];
+    _renderInsightReport(r);
+  } catch (e) {
+    toast('Failed to load report: ' + e.message, 'error');
+    _showInsLoading(false);
+  }
+}
+
+async function sendInsightQuestion() {
+  if (!_insightReport) return;
+  const input = document.getElementById('ins-chat-input');
+  const q = (input?.value || '').trim();
+  if (!q) return;
+  input.value = '';
+  _insightMessages.push({ role: 'user', content: q });
+  _insChatAppend('user', q);
+  const thinking = _insChatAppend('assistant', '…');
+  try {
+    const res = await apiFetch('/insights/reports/' + _insightReport.id + '/ask', {
+      method: 'POST',
+      body: JSON.stringify({ messages: _insightMessages }),
+    });
+    if (thinking) thinking.textContent = res.answer;
+    _insightMessages.push({ role: 'assistant', content: res.answer });
+  } catch (e) {
+    if (thinking) thinking.textContent = 'Could not get an answer: ' + e.message;
+  }
+}
+
+function askInsightPreset(q) {
+  const input = document.getElementById('ins-chat-input');
+  if (input) { input.value = q; sendInsightQuestion(); }
+}
+
+function _insChatAppend(role, text) {
+  const container = document.getElementById('ins-chat-messages');
+  if (!container) return null;
+  const el = document.createElement('div');
+  el.className = 'ins-chat-msg ins-chat-' + role;
+  el.textContent = text;
+  container.appendChild(el);
+  container.scrollTop = container.scrollHeight;
+  return el;
 }

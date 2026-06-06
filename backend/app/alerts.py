@@ -18,11 +18,11 @@ from email.mime.text import MIMEText
 from typing import Any, Dict, List
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models import AlertConfig
+from app.models import AlertConfig, Webhook
 
 logger = logging.getLogger("relora.alerts")
 
@@ -51,6 +51,14 @@ async def dispatch_dlq_alert(
     if not alert_configs:
         return
 
+    dlq_depth_result = await session.execute(
+        select(func.count()).select_from(Webhook).where(
+            Webhook.tenant_id == tenant_id,
+            Webhook.status == "dead",
+        )
+    )
+    current_dlq_depth = dlq_depth_result.scalar_one()
+
     alert_data = {
         "webhook_id": webhook_id,
         "event_id": event_id,
@@ -61,7 +69,10 @@ async def dispatch_dlq_alert(
     }
 
     tasks = []
+    fired_configs: List[AlertConfig] = []
     for config in alert_configs:
+        if config.dlq_threshold is not None and current_dlq_depth < config.dlq_threshold:
+            continue
         if config.channel_type == "slack":
             tasks.append(_send_slack_alert(config, alert_data))
         elif config.channel_type == "email":
@@ -79,6 +90,8 @@ async def dispatch_dlq_alert(
                     "alert_config_id": str(config.id),
                 },
             )
+            continue
+        fired_configs.append(config)
 
     # Fire all alerts concurrently — a single failure must not block others
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -88,8 +101,8 @@ async def dispatch_dlq_alert(
                 "Alert delivery failed.",
                 extra={
                     "event": "alert.delivery_failed",
-                    "alert_config_id": str(alert_configs[i].id),
-                    "channel_type": alert_configs[i].channel_type,
+                    "alert_config_id": str(fired_configs[i].id),
+                    "channel_type": fired_configs[i].channel_type,
                     "error": str(result),
                 },
             )

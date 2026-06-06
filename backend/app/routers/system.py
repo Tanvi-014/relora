@@ -297,6 +297,39 @@ async def get_dashboard(
         for r in fail_result.fetchall()
     ]
 
+    # ── Last completed delivery time ──
+    last_del_row = await db.execute(
+        text("SELECT MAX(updated_at) FROM webhooks WHERE tenant_id = :tid AND status = 'completed'"),
+        {"tid": tenant_id},
+    )
+    last_delivery_at = last_del_row.scalar()
+
+    # ── Recent activity (for seeding the live feed) ──
+    activity_result = await db.execute(
+        text("""
+        SELECT w.id::text, w.status, w.updated_at, w.destination_url,
+               d.name AS destination_name
+        FROM webhooks w
+        LEFT JOIN destinations d ON d.id = w.destination_id
+        WHERE w.tenant_id = :tid
+          AND w.status IN ('completed', 'failed')
+          AND w.updated_at >= NOW() - INTERVAL '24 hours'
+        ORDER BY w.updated_at DESC
+        LIMIT 20
+        """),
+        {"tid": tenant_id},
+    )
+    recent_activity = [
+        {
+            "id": r.id,
+            "status": r.status,
+            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            "destination_url": r.destination_url,
+            "destination_name": r.destination_name,
+        }
+        for r in activity_result.fetchall()
+    ]
+
     # ── Throughput sparkline: deliveries per hour, last 24 h ──
     spark_result = await db.execute(
         text("""
@@ -410,6 +443,9 @@ async def get_dashboard(
         "unacked_schema_changes": unacked_schema_changes,
         "active_incidents": active_incidents,
         "recent_failures": recent_failures,
+        "recent_activity": recent_activity,
+        "deliveries_today": completed_24h,
+        "last_delivery_at": last_delivery_at.isoformat() if last_delivery_at else None,
         "sparkline": sparkline,
     }
 
@@ -495,6 +531,23 @@ async def websocket_endpoint(
         pass
     finally:
         await ws_manager.disconnect(websocket, project_key)
+
+
+@router.delete("/api/v1/data/test")
+async def clear_test_data(
+    tenant_id: str = Depends(get_tenant_from_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete all simulated/test webhook events for this tenant."""
+    from sqlalchemy import delete as _delete
+    result = await db.execute(
+        _delete(Webhook)
+        .where(Webhook.tenant_id == tenant_id, Webhook.is_simulation == True)
+        .returning(Webhook.id)
+    )
+    deleted = len(result.fetchall())
+    await db.commit()
+    return {"deleted": deleted, "message": f"Cleared {deleted} test event{'s' if deleted != 1 else ''}"}
 
 
 @router.get("/api/v1/audit-log")

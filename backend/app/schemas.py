@@ -84,12 +84,16 @@ class AlertConfigCreate(BaseModel):
     channel_type: str = Field(..., pattern="^(slack|email)$")
     config: Dict[str, Any]
     enabled: Optional[bool] = True
+    dlq_threshold: Optional[int] = Field(None, ge=1)
+    error_rate_threshold: Optional[float] = Field(None, ge=0.0, le=100.0)
 
 
 class AlertConfigUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     config: Optional[Dict[str, Any]] = None
     enabled: Optional[bool] = None
+    dlq_threshold: Optional[int] = Field(None, ge=1)
+    error_rate_threshold: Optional[float] = Field(None, ge=0.0, le=100.0)
 
 
 class AlertConfigResponse(BaseModel):

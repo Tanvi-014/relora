@@ -1,6 +1,6 @@
 """
 Live integration tests against a running Relora instance.
-Run with: HERMES_TEST_BASE_URL=http://localhost:8000 pytest tests/test_api_integration.py
+Run with: RELORA_TEST_BASE_URL=http://localhost:8000 pytest tests/test_api_integration.py
 
 Inside Docker Compose these use http://downstream:9000/ok and /fail.
 """
@@ -9,9 +9,9 @@ import uuid
 import pytest
 import httpx
 
-BASE_URL = os.getenv("HERMES_TEST_BASE_URL", "http://localhost:8000")
-DOWNSTREAM_OK = os.getenv("HERMES_TEST_DOWNSTREAM_OK", "http://downstream:9000/ok")
-DOWNSTREAM_FAIL = os.getenv("HERMES_TEST_DOWNSTREAM_FAIL", "http://downstream:9000/fail")
+BASE_URL = os.getenv("RELORA_TEST_BASE_URL", "http://localhost:8000")
+DOWNSTREAM_OK = os.getenv("RELORA_TEST_DOWNSTREAM_OK", "http://downstream:9000/ok")
+DOWNSTREAM_FAIL = os.getenv("RELORA_TEST_DOWNSTREAM_FAIL", "http://downstream:9000/fail")
 
 _session_token = None
 _project_api_key = None

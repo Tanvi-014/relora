@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Relora - Reliable Webhook Delivery</title>
+  <meta name="description" content="Receive, retry, replay, and monitor webhooks with production-grade reliability.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="relora-design.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="landing.html"><img src="logo.svg" alt="">Relora</a>
+    <nav class="navlinks" aria-label="Landing sections">
+      <a href="#features">Features</a>
+      <a href="#how-it-works">How it works</a>
+      <a href="docs.html">Docs</a>
+    </nav>
+    <div class="actions">
+      <a class="btn" href="login.html">Sign in</a>
+      <a class="btn primary" href="register.html">Create account</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero hero--landing">
+      <div class="shell hero-grid">
+        <div data-reveal>
+          <div class="eyebrow">Webhook reliability</div>
+          <h1>Relora</h1>
+          <p class="lead">Stop losing webhooks from Stripe, GitHub, Shopify, or your own services. Relora catches every event, retries failures automatically, and shows you exactly what happened — so you can fix it or replay it.</p>
+          <div class="hero-actions">
+            <a class="btn primary" href="register.html">Get started free</a>
+            <a class="btn" href="login.html">Sign in</a>
+          </div>
+          <div class="hero-proof">
+            <span><strong>Never lose an event</strong><br>Saved before we respond</span>
+            <span><strong>Auto-retry</strong><br>Backs off, respects rate limits</span>
+            <span><strong>Replay anything</strong><br>One event or a time window</span>
+          </div>
+        </div>
+
+        <div class="preview-frame" data-reveal>
+          <div class="frame-chrome">
+            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+            <span class="url">relora://ingest.log</span>
+            <span class="log-live-pill"><span class="log-live-dot"></span>LIVE</span>
+          </div>
+          <div class="log-stats">
+            <span style="color:var(--muted,#6b7280);font-size:12px">Simulated event stream — your real data appears here</span>
+          </div>
+          <div class="log-body" id="landing-log-body"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="features">
+      <div class="shell">
+        <div class="section-head" data-reveal>
+          <div class="eyebrow">Features</div>
+          <h2>When a webhook fails, you'll know why — and fix it in seconds.</h2>
+          <p class="lead">Relora answers the questions that matter: did we receive it, where did it go, why did it fail, and can I safely resend it?</p>
+        </div>
+        <div class="feature-grid" id="feature-grid"></div>
+      </div>
+    </section>
+
+    <section class="section" id="how-it-works">
+      <div class="shell">
+        <div class="section-head" data-reveal>
+          <div class="eyebrow">How it works</div>
+          <h2>Three steps from zero to reliable.</h2>
+          <p class="lead">Point your services at Relora. It accepts the event instantly, retries delivery to your app, and keeps a full record you can replay any time.</p>
+        </div>
+        <div class="blueprint">
+          <article class="card" data-reveal>
+            <div class="card-head"><div class="card-title">Integration Blueprint</div><div class="card-meta">frontend -> backend</div></div>
+            <div class="map-row"><strong>Reliability score ring</strong><span>-></span><span>/api/v1/dashboard, /dlq/health</span></div>
+            <div class="map-row"><strong>Delivery journey</strong><span>-></span><span>/api/v1/events/{id}/journey</span></div>
+            <div class="map-row"><strong>Live activity feed</strong><span>-></span><span>/ws/{api_key}</span></div>
+            <div class="map-row"><strong>What changed panel</strong><span>-></span><span>/schema-changes, incident engine</span></div>
+            <div class="map-row"><strong>Architecture flow</strong><span>-></span><span>ingest, worker, destinations, DLQ</span></div>
+          </article>
+          <article class="card arch-card" data-reveal>
+            <svg class="architecture-svg" viewBox="0 0 920 210" role="img" aria-label="Relora backend architecture">
+              <rect width="920" height="210" fill="#0c131d"/>
+              <path class="arch-line" d="M118 106H268M430 106H562M724 106H846M488 134V172H248V134" stroke="#2dd4bf" stroke-width="4" fill="none" stroke-linecap="round"/>
+              <g fill="#121a24" stroke="rgba(255,255,255,.16)" stroke-width="1.5">
+                <rect x="34" y="58" width="118" height="96" rx="8"/><rect x="248" y="58" width="202" height="96" rx="8"/>
+                <rect x="562" y="58" width="182" height="96" rx="8"/><rect x="796" y="58" width="90" height="96" rx="8"/>
+                <rect x="190" y="150" width="118" height="42" rx="8"/>
+              </g>
+              <g fill="#f7fafc" font-family="Inter, sans-serif" font-size="15" font-weight="700">
+                <text x="61" y="100">Sources</text><text x="294" y="100">API + Postgres</text><text x="607" y="100">Workers</text><text x="820" y="100">Apps</text><text x="215" y="176">DLQ</text>
+              </g>
+              <g fill="#94a3b8" font-family="JetBrains Mono, monospace" font-size="11">
+                <text x="61" y="124">POST</text><text x="288" y="124">200 + persist</text><text x="595" y="124">retry + circuit</text><text x="814" y="124">signed</text>
+              </g>
+            </svg>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="cta-band">
+      <div class="shell" data-reveal>
+        <div class="eyebrow">Ready</div>
+        <h2>Stop chasing down missing webhooks.</h2>
+        <p class="lead">Self-hosted and free. Takes about 5 minutes to set up. Every event kept, every failure explained, every delivery replayable.</p>
+        <div class="hero-actions" style="justify-content:center">
+          <a class="btn primary" href="register.html">Create your account</a>
+          <a class="btn" href="docs.html">Read the docs</a>
+        </div>
+        <div style="margin-top:28px;display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap">
+          <span style="font-size:12px;color:var(--muted,#6b7280)">Deploy to your cloud:</span>
+          <a href="https://railway.app/new" target="_blank" rel="noopener"
+             style="display:inline-flex;align-items:center;gap:7px;padding:7px 14px;border-radius:5px;border:1px solid rgba(255,255,255,.12);font-size:12px;font-weight:500;color:#e8e8e8;text-decoration:none;background:rgba(255,255,255,.04)"
+             onmouseover="this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.background='rgba(255,255,255,.04)'">
+            <svg width="14" height="14" viewBox="0 0 100 100" fill="currentColor"><circle cx="50" cy="50" r="50"/></svg>
+            Deploy on Railway
+          </a>
+          <a href="https://render.com/deploy" target="_blank" rel="noopener"
+             style="display:inline-flex;align-items:center;gap:7px;padding:7px 14px;border-radius:5px;border:1px solid rgba(255,255,255,.12);font-size:12px;font-weight:500;color:#e8e8e8;text-decoration:none;background:rgba(255,255,255,.04)"
+             onmouseover="this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.background='rgba(255,255,255,.04)'">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+            Deploy on Render
+          </a>
+          <a href="https://fly.io" target="_blank" rel="noopener"
+             style="display:inline-flex;align-items:center;gap:7px;padding:7px 14px;border-radius:5px;border:1px solid rgba(255,255,255,.12);font-size:12px;font-weight:500;color:#e8e8e8;text-decoration:none;background:rgba(255,255,255,.04)"
+             onmouseover="this.style.background='rgba(255,255,255,.08)'" onmouseout="this.style.background='rgba(255,255,255,.04)'">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+            Deploy on Fly.io
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Relora</span>
+    <span>Reliable webhook delivery for production teams.</span>
+  </footer>
+
+  <script src="mock-data.js"></script>
+  <script src="relora-utils.js"></script>
+  <script src="landing.js"></script>
+</body>
+</html>

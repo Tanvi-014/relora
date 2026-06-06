@@ -249,6 +249,23 @@ async def analyze_dlq(
     }
 
 
+@router.patch("/api/v1/dlq/incidents/{incident_id}/resolve")
+async def resolve_incident(
+    incident_id: str,
+    tenant_id: str = Depends(get_tenant_from_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually resolve/dismiss an incident."""
+    result = await db.execute(select(Incident).where(Incident.id == UUID(incident_id)))
+    incident = result.scalar_one_or_none()
+    if not incident:
+        raise HTTPException(404, "Incident not found")
+    incident.state = "RESOLVED"
+    incident.resolved_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"success": True, "incident_id": incident_id, "state": "RESOLVED"}
+
+
 @router.delete("/api/v1/dlq/archive")
 async def archive_dlq(
     older_than_days: int = Query(30, ge=1, le=365, description="Archive failed webhooks older than N days"),

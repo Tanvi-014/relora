@@ -4,7 +4,7 @@ services:
     container_name: relora-postgres
     environment:
       POSTGRES_USER: relora
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hermesdev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-reloradev}
       POSTGRES_DB: relora
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -35,8 +35,8 @@ services:
     container_name: relora-migrate
     command: sh -c "cd /app/backend && alembic upgrade head"
     environment:
-      DATABASE_URL: postgresql+asyncpg://relora:${POSTGRES_PASSWORD:-hermesdev}@postgres:5432/relora
-      SYNC_DATABASE_URL: postgresql://relora:${POSTGRES_PASSWORD:-hermesdev}@postgres:5432/relora
+      DATABASE_URL: postgresql+asyncpg://relora:${POSTGRES_PASSWORD:-reloradev}@postgres:5432/relora
+      SYNC_DATABASE_URL: postgresql://relora:${POSTGRES_PASSWORD:-reloradev}@postgres:5432/relora
     depends_on:
       postgres:
         condition: service_healthy
@@ -49,8 +49,8 @@ services:
     container_name: relora-api
     command: uvicorn app.api_main:app --host 0.0.0.0 --port 8000
     environment:
-      DATABASE_URL: postgresql+asyncpg://relora:${POSTGRES_PASSWORD:-hermesdev}@postgres:5432/relora
-      SYNC_DATABASE_URL: postgresql://relora:${POSTGRES_PASSWORD:-hermesdev}@postgres:5432/relora
+      DATABASE_URL: postgresql+asyncpg://relora:${POSTGRES_PASSWORD:-reloradev}@postgres:5432/relora
+      SYNC_DATABASE_URL: postgresql://relora:${POSTGRES_PASSWORD:-reloradev}@postgres:5432/relora
       ENVIRONMENT: ${ENVIRONMENT:-development}
       AUTO_CREATE_TABLES: "false"
       ALLOW_PRIVATE_DESTINATIONS: ${ALLOW_PRIVATE_DESTINATIONS:-false}
@@ -99,7 +99,7 @@ services:
       retries: 3
       start_period: 15s
     environment:
-      DATABASE_URL: postgresql+asyncpg://relora:${POSTGRES_PASSWORD:-hermesdev}@postgres:5432/relora
+      DATABASE_URL: postgresql+asyncpg://relora:${POSTGRES_PASSWORD:-reloradev}@postgres:5432/relora
       ENVIRONMENT: ${ENVIRONMENT:-development}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-10}
       WORKER_POLL_INTERVAL_SECONDS: "1"
@@ -121,7 +121,7 @@ services:
     container_name: relora-downstream
     command: uvicorn scripts.fake_downstream:app --host 0.0.0.0 --port 9000
     environment:
-      DATABASE_URL: postgresql+asyncpg://relora:${POSTGRES_PASSWORD:-hermesdev}@postgres:5432/relora
+      DATABASE_URL: postgresql+asyncpg://relora:${POSTGRES_PASSWORD:-reloradev}@postgres:5432/relora
     volumes:
       - ./backend:/workspace/backend:ro
     ports:

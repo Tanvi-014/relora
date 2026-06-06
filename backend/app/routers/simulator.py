@@ -21,6 +21,12 @@ async def simulate_providers(tenant_id: str = Depends(get_tenant_from_auth)):
     return list_providers()
 
 
+_OUTCOME_URLS = {
+    "success": "http://downstream:9000/ok",
+    "fail":    "http://downstream:9000/fail",
+}
+
+
 @router.post("/api/v1/simulate")
 async def simulate_webhook(
     body: Dict[str, Any] = Body(...),
@@ -32,12 +38,17 @@ async def simulate_webhook(
     provider = body.get("provider", "stripe")
     event_type = body.get("event_type", "payment_intent.succeeded")
     destination_id = body.get("destination_id")
+    outcome = body.get("outcome", "real")  # "real" | "success" | "fail" | "flaky"
     overrides = body.get("overrides", {})
+
+    if outcome not in ("real", "success", "fail", "flaky"):
+        raise HTTPException(400, "outcome must be real, success, fail, or flaky")
 
     payload = build_simulated_payload(provider, event_type, overrides)
     if payload is None:
         raise HTTPException(400, f"Unknown provider/event: {provider}/{event_type}")
 
+    dest_obj = None
     dest_url = None
     dest_id_obj = None
     if destination_id:
@@ -52,19 +63,30 @@ async def simulate_webhook(
     else:
         raise HTTPException(400, "destination_id or url required")
 
+    # Override delivery URL for predetermined outcomes — routes to internal downstream service
+    if outcome == "flaky":
+        # Unique key per call so each flaky test starts its own counter
+        dest_url = f"http://downstream:9000/flaky/{_uuid_mod.uuid4().hex[:8]}"
+    elif outcome in _OUTCOME_URLS:
+        dest_url = _OUTCOME_URLS[outcome]
+
+    # Success needs no retries; fail should exhaust retries to reach DLQ
+    dest_max_retries = dest_obj.max_retries if dest_obj else settings.DEFAULT_MAX_RETRIES
+    max_retries = 0 if outcome == "success" else dest_max_retries
+
     webhook = Webhook(
         tenant_id=tenant_id,
         event_id=payload.get("id", str(_uuid_mod.uuid4())),
         destination_url=dest_url,
         destination_id=dest_id_obj,
         payload=payload,
-        headers={"X-Relora-Simulated": "true", "X-Relora-Provider": provider},
+        headers={"X-Relora-Simulated": "true", "X-Relora-Provider": provider, "X-Relora-Outcome": outcome},
         idempotency_key=None,
         status=WebhookStatus.PENDING.value,
-        max_retries=settings.DEFAULT_MAX_RETRIES,
+        max_retries=max_retries,
         is_simulation=True,
     )
     db.add(webhook)
     await db.commit()
     await db.refresh(webhook)
-    return {"webhook_id": str(webhook.id), "payload": payload}
+    return {"webhook_id": str(webhook.id), "payload": payload, "outcome": outcome}

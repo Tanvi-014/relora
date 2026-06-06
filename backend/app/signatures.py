@@ -27,12 +27,17 @@ def _get_secret(provider: str) -> str:
     )
 
 
-def verify_webhook_signature(provider: Optional[str], request: Request, raw_body: bytes) -> None:
+def verify_webhook_signature(
+    provider: Optional[str],
+    request: Request,
+    raw_body: bytes,
+    secret: Optional[str] = None,
+) -> None:
     if not provider:
         return
 
     provider = provider.lower()
-    secret = _get_secret(provider)
+    secret = secret or _get_secret(provider)
     if not secret:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

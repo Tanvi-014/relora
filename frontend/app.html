@@ -1,0 +1,1343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Relora — Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="app-identity.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Header ── -->
+  <header class="header">
+    <a class="header-logo" href="/app.html">
+      <div class="logo-icon">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/>
+        </svg>
+      </div>
+      Relora
+    </a>
+
+    <!-- Project switcher — left of search for project context -->
+    <div class="project-switcher" id="ps-trigger">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18M3 12h18M3 17h18"/></svg>
+      <span class="ps-name" id="ps-name">Loading…</span>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+      <div class="ps-dropdown" id="ps-dropdown">
+        <div id="ps-list"></div>
+        <div class="ps-separator"></div>
+        <div class="ps-item" onclick="openNewProjectModal()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+          New Project
+        </div>
+      </div>
+    </div>
+
+    <!-- Global search — center -->
+    <div class="header-search" style="flex:1;max-width:340px;margin:0 16px;position:relative">
+      <div class="header-search-icon" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text3);pointer-events:none;display:flex;align-items:center">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      </div>
+      <input
+        class="input header-search-input"
+        placeholder="Search webhooks…"
+        style="padding-left:32px;background:var(--bg);border-color:var(--border);font-size:12px;height:34px"
+        id="header-search-input"
+        onfocus="this.style.borderColor='var(--accent)'"
+        onblur="this.style.borderColor='var(--border)'"
+        onkeydown="if(event.key==='Enter'){_headerSearch(this.value)}"
+      >
+      <span class="header-search-kbd" style="position:absolute;right:9px;top:50%;transform:translateY(-50%);font-size:10px;color:var(--text3);background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 5px;font-family:var(--mono)">⌘K</span>
+    </div>
+
+    <div class="ws-status-pill" id="ws-status-pill">
+      <div class="ws-dot connecting" id="ws-dot"></div>
+      <span id="ws-status-text">Connecting</span>
+    </div>
+
+    <!-- Right controls — notification center + user menu -->
+    <div class="header-right">
+
+      <!-- Notification bell -->
+      <div class="notif-btn-wrap" id="notif-btn-wrap">
+        <button class="notif-btn" id="notif-btn" onclick="toggleNotifPanel(event)" aria-label="Notifications">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+          </svg>
+          <span class="notif-badge" id="notif-badge" style="display:none">0</span>
+        </button>
+        <div class="notif-panel" id="notif-panel">
+          <div class="notif-panel-hdr">
+            <span class="notif-panel-title">Notifications</span>
+            <button class="notif-mark-all" id="notif-mark-all" onclick="markAllNotifsRead()">Mark all read</button>
+          </div>
+          <div class="notif-list" id="notif-list">
+            <div class="notif-empty">No notifications</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- User menu -->
+      <div class="user-menu" id="user-menu-trigger">
+        <div class="user-avatar" id="user-initial">?</div>
+        <span class="user-email-short" id="user-email-short">…</span>
+        <div class="user-dropdown" id="user-dropdown">
+          <div class="user-dropdown-item" id="user-email-full" style="color:var(--text3);font-size:12px;cursor:default"></div>
+          <div class="ps-separator"></div>
+          <div class="user-dropdown-item" onclick="navTo('settings')">Settings</div>
+          <div class="user-dropdown-item danger" onclick="logout()">Sign out</div>
+        </div>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- Setup progress strip — visible until all 3 onboarding steps are complete -->
+  <div id="setup-strip" style="display:none">
+    <div id="setup-strip-inner"></div>
+    <button class="setup-strip-dismiss" onclick="_dismissSetupStrip()" title="Dismiss">×</button>
+  </div>
+
+  <!-- ── Body ── -->
+  <div class="main-body">
+    <!-- ── Sidebar ── -->
+    <nav class="sidebar">
+
+      <!-- Primary -->
+      <div class="nav-item active" data-page="overview" onclick="navTo('overview')">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+          <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
+        </svg>
+        Overview
+      </div>
+
+      <div class="nav-item" data-page="webhooks" onclick="navTo('webhooks')">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 2L11 13"/><path d="M22 2L15 22l-4-9-9-4 20-7z"/>
+        </svg>
+        Webhooks
+        <span class="nav-fail-count hidden" id="failed-badge">0</span>
+      </div>
+
+      <div class="nav-item" data-page="recovery" onclick="navTo('recovery')">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+          <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+        Fix &amp; Replay
+      </div>
+
+      <div class="nav-item" data-page="destinations" onclick="navTo('destinations')">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/>
+          <line x1="12" y1="3" x2="12" y2="9"/><line x1="12" y1="15" x2="12" y2="21"/>
+          <line x1="3" y1="12" x2="9" y2="12"/><line x1="15" y1="12" x2="21" y2="12"/>
+        </svg>
+        Destinations
+      </div>
+
+      <div class="nav-divider"></div>
+
+      <!-- Analyze -->
+      <div class="nav-item nav-item--secondary" data-page="insights" onclick="navTo('insights')">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
+          <polyline points="17 6 23 6 23 12"/>
+        </svg>
+        Insights
+      </div>
+
+      <div class="nav-item nav-item--secondary" data-page="pipeline" onclick="navTo('pipeline')">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="5 9 2 12 5 15"/><polyline points="19 9 22 12 19 15"/>
+          <line x1="2" y1="12" x2="22" y2="12"/>
+        </svg>
+        Event Flow
+      </div>
+
+      <div class="nav-divider"></div>
+
+      <!-- Utility — visually quieter -->
+      <div class="nav-item nav-item--utility" data-page="dlq-intelligence" onclick="navTo('dlq-intelligence')">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v3l2 2"/>
+        </svg>
+        Failed Deliveries
+        <span class="nav-fail-count hidden" id="dlq-nav-badge" style="display:none">0</span>
+      </div>
+
+      <div class="nav-item nav-item--utility" data-page="analytics" onclick="navTo('analytics')">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
+        </svg>
+        Reliability Trends
+      </div>
+
+      <div class="nav-item nav-item--utility" data-page="alerts" onclick="navTo('alerts')">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </svg>
+        Alerts
+      </div>
+
+      <div class="nav-item nav-item--utility" data-page="replay" onclick="navTo('replay')">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/>
+        </svg>
+        Replay
+      </div>
+
+      <div class="nav-item nav-item--utility" data-page="audit" onclick="navTo('audit')">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+        </svg>
+        Audit
+      </div>
+
+      <!-- Bottom: account -->
+      <div class="nav-spacer"></div>
+
+      <div class="nav-item nav-item--utility" data-page="team" onclick="navTo('team')">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+        Team
+      </div>
+
+      <div class="nav-item nav-item--utility" data-page="settings" onclick="navTo('settings')">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        Settings
+      </div>
+
+      <a class="nav-item nav-item--utility" href="/docs.html" target="_blank" style="text-decoration:none;margin-top:4px">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
+        </svg>
+        Docs
+      </a>
+    </nav>
+
+    <!-- ── Content + Detail panel ── -->
+    <div style="display:flex;flex:1;overflow:hidden">
+      <div class="content" id="content-area">
+
+        <!-- ── System Pulse — one-line heartbeat on all non-overview pages ── -->
+        <div class="page-pulse" id="page-pulse">
+          <div class="pp-dot" id="pp-dot"></div>
+          <span class="pp-metric"><strong id="pp-rate">—</strong>&nbsp;success</span>
+          <div class="pp-sep"></div>
+          <span class="pp-metric"><strong id="pp-dlq">—</strong>&nbsp;in DLQ</span>
+          <div class="pp-sep"></div>
+          <span class="pp-metric"><strong id="pp-incidents">—</strong>&nbsp;incidents</span>
+          <div class="pp-sep"></div>
+          <span class="pp-metric"><strong id="pp-delivered">—</strong>&nbsp;delivered today</span>
+          <span class="pp-live pp-live--connected" id="pp-live">LIVE</span>
+        </div>
+
+        <!-- ══════════════════════════════════════════
+             Overview — mission control
+             ══════════════════════════════════════════ -->
+        <div class="page active" id="page-overview">
+
+          <!-- Status strip — 4 signals -->
+          <div class="mc-kpi-strip">
+            <div class="mc-kpi-cell" id="mc-kpi-cell-rate">
+              <span class="mc-kpi-num" id="mc-kpi-rate">—</span>
+              <span class="mc-kpi-lbl">success rate</span>
+            </div>
+            <div class="mc-kpi-div"></div>
+            <div class="mc-kpi-cell" id="mc-kpi-cell-failures">
+              <span class="mc-kpi-num" id="mc-kpi-failures">—</span>
+              <span class="mc-kpi-lbl">failures</span>
+            </div>
+            <div class="mc-kpi-div"></div>
+            <div class="mc-kpi-cell" id="mc-kpi-cell-dlq">
+              <span class="mc-kpi-num" id="mc-kpi-dlq-strip">—</span>
+              <span class="mc-kpi-lbl">in DLQ</span>
+            </div>
+            <div class="mc-kpi-div"></div>
+            <div class="mc-kpi-cell" id="mc-kpi-cell-dests">
+              <span class="mc-kpi-num" id="mc-kpi-dests">—</span>
+              <span class="mc-kpi-lbl">destinations</span>
+            </div>
+          </div>
+          <!-- Ghost IDs kept for JS compat -->
+          <div style="display:none" aria-hidden="true">
+            <span id="mc-kpi-delivered"></span>
+            <span id="mc-kpi-incidents"></span>
+            <span id="mc-kpi-p95-strip"></span>
+          </div>
+
+          <!-- Status banner — single dominant system signal -->
+          <div class="mc-banner" id="mc-banner">
+            <div class="mc-banner-signal">
+              <div class="mc-signal-dot" id="mc-signal-dot"></div>
+              <span class="mc-signal-text" id="mc-signal-text">Checking…</span>
+            </div>
+            <div class="mc-banner-meta" id="mc-banner-meta"></div>
+            <div class="mc-banner-right">
+              <button class="mc-btn-bare" onclick="loadDashboard()">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
+                refresh
+              </button>
+            </div>
+          </div>
+
+          <!-- Next Recommended Action — contextual guided setup -->
+          <div id="nra-card" class="nra-card" style="display:none">
+            <div class="nra-eyebrow">Next recommended action</div>
+            <div id="nra-body"></div>
+          </div>
+
+          <!-- Onboarding — shown only when no destinations / no activity -->
+          <div id="onboarding-card" class="mc-onboard-card" style="display:none">
+            <div class="mc-ob-label">Get started</div>
+            <div class="mc-ob-steps">
+              <div class="mc-ob-step" id="ob-step-1" onclick="navTo('destinations')" style="cursor:pointer">
+                <div class="mc-ob-num" id="ob-num-1">1</div>
+                <div class="mc-ob-body">
+                  <div class="mc-ob-title">Add a destination</div>
+                  <div class="mc-ob-sub">Tell Relora where to deliver webhooks</div>
+                </div>
+                <div class="mc-ob-cta">→</div>
+              </div>
+              <div class="mc-ob-step" id="ob-step-2" onclick="navTo('settings')" style="cursor:pointer">
+                <div class="mc-ob-num" id="ob-num-2">2</div>
+                <div class="mc-ob-body">
+                  <div class="mc-ob-title">Point your source at Relora</div>
+                  <div class="mc-ob-sub">Copy your API key from Settings and configure your ingest endpoint</div>
+                </div>
+                <div class="mc-ob-cta">→</div>
+              </div>
+              <div class="mc-ob-step" id="ob-step-3">
+                <div class="mc-ob-num" id="ob-num-3">3</div>
+                <div class="mc-ob-body">
+                  <div class="mc-ob-title">Send your first webhook</div>
+                  <div class="mc-ob-sub">POST to your ingest URL with your API key — events appear live here</div>
+                  <details style="margin-top:8px">
+                    <summary style="font-size:11px;color:var(--accent-light);cursor:pointer;user-select:none">Show example</summary>
+                    <pre id="ob-curl-example" style="margin-top:8px;font-size:10px;font-family:var(--mono);background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px;color:var(--text2);overflow-x:auto;white-space:pre;line-height:1.5"></pre>
+                  </details>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Triage — surfaced only when action is required -->
+          <div class="mc-triage" id="mc-triage" style="display:none">
+            <div class="mc-triage-hdr">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              Needs attention
+            </div>
+            <div class="mc-triage-list" id="mc-triage-list"></div>
+          </div>
+
+          <!-- Main grid: activity stream (left) | sidebar (right) -->
+          <div class="mc-main-grid">
+
+            <!-- Chronological activity stream -->
+            <div class="mc-stream-panel">
+              <div class="mc-panel-hdr">
+                <span class="mc-panel-label">Activity</span>
+                <div class="mc-live-pill" id="mc-live-pill">
+                  <div class="mc-live-dot"></div>
+                  live
+                </div>
+              </div>
+              <div class="mc-stream-body" id="mc-stream-body">
+                <div class="mc-stream-empty">No activity yet. Once you send your first webhook, each delivery attempt will appear here in real time.</div>
+              </div>
+            </div>
+
+            <!-- Sidebar: destination states + DLQ -->
+            <div class="mc-sidebar">
+
+              <!-- Destination health states -->
+              <div class="mc-sidebar-block">
+                <div class="mc-panel-hdr" style="padding:10px 12px">
+                  <span class="mc-panel-label">Destinations</span>
+                  <button class="mc-btn-bare" onclick="openDestModal()">+ add</button>
+                </div>
+                <div id="mc-dest-list" class="mc-dest-list">
+                  <div class="mc-stream-empty" style="padding:16px 12px">No destinations configured</div>
+                </div>
+                <div class="mc-sidebar-footer">
+                  <button class="btn btn-ghost btn-sm" style="width:100%;justify-content:center;font-size:11px" onclick="navTo('destinations')">Manage →</button>
+                </div>
+              </div>
+
+              <!-- DLQ quick-action — appears only when queue is non-empty -->
+              <div class="mc-sidebar-block mc-dlq-block mc-dlq-block--alert" id="mc-dlq-block" style="display:none">
+                <div class="mc-panel-hdr" style="padding:10px 12px;cursor:pointer" onclick="navTo('dlq-intelligence')">
+                  <span class="mc-panel-label">Needs Attention</span>
+                  <span class="mc-dlq-alert-dot" title="Requires attention"></span>
+                </div>
+                <div class="mc-dlq-body" style="cursor:pointer" onclick="navTo('dlq-intelligence')">
+                  <span class="mc-dlq-num" id="mc-dlq-num">0</span>
+                  <span class="mc-dlq-lbl">events could not be delivered</span>
+                </div>
+                <div style="padding:0 12px 12px;display:flex;gap:6px">
+                  <button class="btn btn-primary btn-sm" style="flex:1" onclick="navTo('dlq-intelligence')">Investigate →</button>
+                  <button class="btn btn-secondary btn-sm" style="flex:1" onclick="navTo('replay')">Replay</button>
+                </div>
+              </div>
+
+            </div><!-- /mc-sidebar -->
+
+          </div><!-- /mc-main-grid -->
+
+
+          <!-- Ghost IDs — JS writes to these, not shown -->
+          <div style="display:none" aria-hidden="true">
+            <div id="command-center"><span id="cc-score-num"></span><div id="cc-bar-fill"></div><span id="cc-dot"></span><span id="cc-status-text"></span></div>
+            <div id="health-split"></div>
+            <div id="throughput-chart"></div>
+            <div id="kpi-pending-card"><div id="kpi-pending"></div><div id="kpi-pending-sub"></div></div>
+            <div id="kpi-success-rate"></div><div id="kpi-p95"></div>
+            <div id="arch-conn-1"><div class="arch-conn-line"></div></div>
+            <div id="arch-conn-2"><div class="arch-conn-line"></div></div>
+            <div id="arch-conn-3"><div class="arch-conn-line"></div></div>
+            <div id="sys-status-row"></div>
+            <div id="incidents-section"><div id="incidents-list"></div></div>
+            <div id="slo-breaches"></div>
+            <div id="schema-drift-alert"></div>
+            <div id="what-changed-card"><div class="wc-left"></div><div id="wc-body"></div></div>
+            <span id="cc-healthy-dests"></span>
+            <span id="cc-open-incidents"></span>
+            <span id="cc-dlq-depth"></span>
+            <span id="cc-cb-open"></span>
+            <div id="kpi-dlq-card"><span id="kpi-dlq"></span><div id="kpi-dlq-sub"></div></div>
+            <div id="kpi-circuit-card"><span id="kpi-circuit"></span><div id="kpi-circuit-sub"></div></div>
+            <span id="arch-ingest-sub"></span><span id="arch-worker-sub"></span><span id="arch-dest-sub"></span>
+            <div id="ops-incidents-wrap"></div><div id="ops-dlq-wrap"></div><div id="ops-cb-wrap"></div>
+            <div id="rel-feed-body"></div>
+            <div id="rel-feed-live"><div class="rel-feed-dot"></div></div>
+          </div>
+
+        </div><!-- /page-overview -->
+
+        <!-- ══════════════════════════════════════════
+             Webhooks page
+             ══════════════════════════════════════════ -->
+        <div class="page" id="page-webhooks">
+          <div class="page-title">Webhooks</div>
+          <div class="page-subtitle">Every ingested event and its full delivery history. Click a row to inspect payload, attempts, and retry timeline.</div>
+          <div class="table-wrap">
+            <div class="table-toolbar">
+              <div class="search-input">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text3)"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                <input class="input" id="wh-search" placeholder="Search payload content…" oninput="debounceSearch()" style="padding-left:32px">
+              </div>
+              <select class="select" style="width:150px" id="wh-status-filter" onchange="loadWebhooks(1)">
+                <option value="">All statuses</option>
+                <option value="pending">Pending</option>
+                <option value="processing">Processing</option>
+                <option value="completed">Completed</option>
+                <option value="failed">Failed</option>
+              </select>
+              <select class="select" style="width:180px" id="wh-dest-filter" onchange="loadWebhooks(1)">
+                <option value="">All destinations</option>
+              </select>
+              <button class="btn btn-secondary btn-sm" onclick="loadWebhooks(1)">Refresh</button>
+            </div>
+            <div id="webhooks-table-body">
+              <div class="empty-state">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><path d="M22 2L11 13"/><path d="M22 2L15 22l-4-9-9-4 20-7z"/></svg>
+                <div class="title">No events yet</div>
+                <div class="desc">When you send a webhook to your Relora ingest URL, it will appear here with its full delivery history. Go to Overview to get your test command.</div>
+              </div>
+            </div>
+            <div class="pagination" id="wh-pagination"></div>
+          </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════
+             Destinations page
+             ══════════════════════════════════════════ -->
+        <div class="page" id="page-destinations">
+          <div class="page-hdr">
+            <div>
+              <div class="page-title">Destinations</div>
+              <div class="page-subtitle" style="margin-bottom:0">Configure where Relora delivers events. Each destination has independent retry settings, health monitoring, and delivery tracking.</div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-secondary" onclick="openSimModal()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                Send Test Event
+              </button>
+              <button class="btn btn-primary" onclick="openDestModal()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+                New Destination
+              </button>
+            </div>
+          </div>
+          <!-- Ingest URL bar — always visible so users know where to point their sources -->
+          <div style="background:rgba(0,212,126,.05);border:1px solid rgba(0,212,126,.15);border-radius:7px;padding:10px 14px;margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--success);font-family:var(--mono);white-space:nowrap">Ingest URL</span>
+            <input id="dest-ingest-url" readonly style="flex:1;min-width:200px;background:transparent;border:none;outline:none;font-family:var(--mono);font-size:12px;color:var(--text2);" value="">
+            <button class="btn btn-secondary btn-sm" onclick="copyIngestUrl()" style="white-space:nowrap">Copy</button>
+            <span style="font-size:11px;color:var(--text3)">Point Stripe, GitHub, Shopify — any source — at this URL</span>
+          </div>
+
+          <!-- Circuit breaker open banner (shown when any dest is open) -->
+          <div class="cb-open-banner hidden" id="cb-open-banner">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <span id="cb-open-banner-text">1 destination circuit breaker is OPEN — deliveries suspended.</span>
+          </div>
+          <div class="table-wrap" id="dest-table-wrap">
+            <table id="dest-table">
+              <thead>
+                <tr>
+                  <th style="width:100px">Status</th>
+                  <th>Name</th>
+                  <th>URL</th>
+                  <th style="width:90px">Retries</th>
+                  <th style="width:100px"><span class="tip" data-tip="Circuit breaker — automatically stops sending to a failing endpoint. Resets when the destination recovers.">Circuit</span></th>
+                  <th style="width:72px">7d Rate</th>
+                  <th style="width:160px"></th>
+                </tr>
+              </thead>
+              <tbody id="dest-tbody">
+                <tr><td colspan="7">
+                  <div class="empty-state">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/></svg>
+                    <div class="title">No destinations yet</div>
+                    <div class="desc">Add a destination to start routing webhooks to your endpoints.</div>
+                  </div>
+                </td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+
+        <!-- ══════════════════════════════════════════
+             Alerts page
+             ══════════════════════════════════════════ -->
+        <div class="page" id="page-alerts">
+          <div class="page-hdr">
+            <div>
+              <div class="page-title">Alerts</div>
+              <div class="page-subtitle" style="margin-bottom:0">Get notified when deliveries fail — so you can act before your customers notice.</div>
+            </div>
+            <button class="btn btn-primary" onclick="openAlertModal()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+              New Alert Channel
+            </button>
+          </div>
+          <div id="alerts-list"></div>
+        </div>
+
+
+        <!-- ══════════════════════════════════════════
+             Analytics page
+             ══════════════════════════════════════════ -->
+        <div class="page" id="page-analytics">
+          <div class="page-title">Reliability Trends</div>
+          <div class="page-subtitle">Delivery speed and success rates per destination, last 7 days. See exactly how your system is performing.</div>
+          <div id="analytics-content">
+            <div class="empty-state">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+              <div class="title">No data yet</div>
+              <div class="desc">Once events start flowing, you'll see delivery speed and success rates per destination — so you can spot which ones are slow or unreliable before your users do.</div>
+            </div>
+          </div>
+        </div>
+
+
+        <!-- ══════════════════════════════════════════
+             Bulk Replay page
+             ══════════════════════════════════════════ -->
+        <div class="page" id="page-replay">
+          <div class="page-title">Bulk Replay</div>
+          <div class="page-subtitle">Re-send webhooks from any time window. Use this after fixing a broken destination to catch up on missed events.</div>
+          <!-- Compact form bar -->
+          <div class="card" style="margin-bottom:16px">
+            <div style="display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap">
+              <div class="input-group" style="flex:1;min-width:160px;margin-bottom:0">
+                <label class="input-label">From</label>
+                <input class="input" type="datetime-local" id="replay-from">
+              </div>
+              <div class="input-group" style="flex:1;min-width:160px;margin-bottom:0">
+                <label class="input-label">To</label>
+                <input class="input" type="datetime-local" id="replay-to">
+              </div>
+              <div class="input-group" style="flex:1;min-width:160px;margin-bottom:0">
+                <label class="input-label">Destination</label>
+                <select class="select" id="replay-dest"><option value="">All destinations</option></select>
+              </div>
+              <div class="input-group" style="width:140px;margin-bottom:0">
+                <label class="input-label">Rate (events/min)</label>
+                <input class="input" type="number" id="replay-rate" value="100" min="1" max="1000">
+              </div>
+              <button class="btn btn-primary" style="flex-shrink:0;align-self:flex-end" onclick="startBulkReplay()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
+                Start Replay Job
+              </button>
+            </div>
+          </div>
+          <!-- Jobs table -->
+          <div class="table-wrap">
+            <div class="table-toolbar" style="padding:12px 16px">
+              <span style="font-size:13px;font-weight:500">Replay Jobs</span>
+            </div>
+            <div id="replay-jobs-list">
+              <div class="empty-state">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
+                <div class="title">No bulk replays yet</div>
+                <div class="desc">Use this after fixing a broken destination. Select a time window and Relora will re-send every event from that period at a controlled rate — so you don't accidentally overwhelm your endpoint.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════
+             Team page
+             ══════════════════════════════════════════ -->
+        <div class="page" id="page-team">
+          <div class="page-hdr">
+            <div>
+              <div class="page-title">Team</div>
+              <div class="page-subtitle" style="margin-bottom:0">Manage project members and roles</div>
+            </div>
+            <button class="btn btn-primary" onclick="openInviteModal()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+              Invite Member
+            </button>
+          </div>
+          <div class="card"><div id="team-list"></div></div>
+        </div>
+
+        <!-- ══════════════════════════════════════════
+             Settings page
+             ══════════════════════════════════════════ -->
+        <div class="page" id="page-settings">
+          <div class="page-title">Settings</div>
+          <div class="page-subtitle">Project configuration and API credentials</div>
+          <div style="max-width:600px">
+            <div class="settings-section">
+              <div class="settings-section-title">API Credentials</div>
+              <div style="margin-bottom:6px;font-size:13px;font-weight:500;color:var(--text)">Project API Key</div>
+              <div style="display:flex;gap:8px;margin-bottom:6px">
+                <input class="input" id="settings-api-key" readonly style="font-family:var(--mono);font-size:12px">
+                <button class="btn btn-secondary btn-sm" onclick="copyApiKey()">Copy</button>
+                <button class="btn btn-secondary btn-sm" onclick="rotateApiKey()" id="rotate-key-btn">Rotate</button>
+              </div>
+              <div style="font-size:12px;color:var(--text3)">
+                Authenticate as <span class="inline-code">X-Relora-API-Key: &lt;key&gt;</span> or <span class="inline-code">Authorization: Bearer &lt;key&gt;</span>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <div class="settings-section-title">Webhook Ingestion</div>
+              <div style="margin-bottom:6px;font-size:13px;font-weight:500;color:var(--text)">Ingestion Endpoint</div>
+              <div style="display:flex;gap:8px;margin-bottom:6px">
+                <input class="input" id="settings-ingest-url" readonly style="font-family:var(--mono);font-size:12px" value="">
+                <button class="btn btn-secondary btn-sm" onclick="copyIngestUrl()">Copy</button>
+              </div>
+              <div style="font-size:12px;color:var(--text3)">
+                <span class="inline-code">POST</span> to this URL to ingest a webhook event. Include your API key in the header.
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <div class="settings-section-title">Webhook Verification</div>
+              <div style="font-size:13px;color:var(--text2);margin-bottom:16px">
+                Store per-project signing secrets for inbound webhook verification. Add <span class="inline-code">?signature_provider=stripe</span> (or github / relora) to your ingest URL and Relora will reject requests with invalid signatures.
+              </div>
+              <div id="signing-secrets-list" style="margin-bottom:16px"></div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+                <div>
+                  <div style="font-size:12px;font-weight:500;color:var(--text);margin-bottom:4px">Provider</div>
+                  <select class="select" id="signing-provider" style="width:140px">
+                    <option value="stripe">Stripe</option>
+                    <option value="github">GitHub</option>
+                    <option value="relora">Relora</option>
+                    <option value="generic">Generic</option>
+                  </select>
+                </div>
+                <div style="flex:1;min-width:160px">
+                  <div style="font-size:12px;font-weight:500;color:var(--text);margin-bottom:4px">Secret</div>
+                  <input class="input" id="signing-secret" type="password" placeholder="whsec_… or secret value" autocomplete="new-password">
+                </div>
+                <button class="btn btn-primary btn-sm" onclick="saveSigningSecret()">Save Secret</button>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <div class="settings-section-title">Danger Zone</div>
+              <div class="settings-danger-zone" style="margin-bottom:10px">
+                <div class="settings-danger-title">Clear test data</div>
+                <div class="settings-danger-desc">Delete all simulated and test events (events sent via the "Test" button or simulator). Your real webhook data is not affected.</div>
+                <button class="btn btn-danger btn-sm" onclick="clearTestData()">Clear test data</button>
+              </div>
+              <div class="settings-danger-zone">
+                <div class="settings-danger-title">Delete Project</div>
+                <div class="settings-danger-desc">Permanently delete this project and all associated webhooks, destinations, and data. This action cannot be undone.</div>
+                <button class="btn btn-danger btn-sm" onclick="confirmDeleteProject()">Delete Project</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════
+             DLQ Intelligence page
+             ══════════════════════════════════════════ -->
+        <div class="page" id="page-dlq-intelligence">
+
+          <!-- Compact header: title + inline status + incident counts -->
+          <div class="dlq-inv-header">
+            <div class="dlq-inv-header-left">
+              <div class="page-title">Failed Deliveries</div>
+              <div class="dlq-inv-status-row">
+                <span class="dlq-inv-status-badge" id="health-status">—</span>
+                <span class="dlq-inv-score" id="health-score-value">—</span>
+                <span class="dlq-inv-score-of">/100</span>
+                <span class="dlq-inv-desc" id="health-description"></span>
+              </div>
+            </div>
+            <div class="dlq-inv-header-right">
+              <div class="dlq-inv-counters">
+                <div class="dlq-inv-counter">
+                  <span class="dlq-inv-counter-num" id="total-incidents">—</span>
+                  <span class="dlq-inv-counter-lbl">incidents</span>
+                </div>
+                <div class="dlq-inv-counter dlq-inv-counter--warn">
+                  <span class="dlq-inv-counter-num" id="open-incidents">—</span>
+                  <span class="dlq-inv-counter-lbl">open</span>
+                </div>
+                <div class="dlq-inv-counter dlq-inv-counter--crit">
+                  <span class="dlq-inv-counter-num" id="critical-incidents">—</span>
+                  <span class="dlq-inv-counter-lbl">critical</span>
+                </div>
+                <div class="dlq-inv-counter">
+                  <span class="dlq-inv-counter-num" id="affected-destinations">—</span>
+                  <span class="dlq-inv-counter-lbl">affected</span>
+                </div>
+              </div>
+              <button class="btn btn-secondary btn-sm" onclick="loadDLQIntelligence()">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          <div id="dlq-loading" class="loading">Loading…</div>
+          <div id="dlq-error" class="dlq-error" style="display:none;"></div>
+          <div id="dlq-content" style="display:none;">
+
+            <!-- Investigation grid: main (incidents + root causes) | sidebar (types + destinations) -->
+            <div class="dlq-inv-grid">
+
+              <div class="dlq-inv-main">
+                <div class="dlq-inv-section-label">Active incidents</div>
+                <div id="active-incidents" class="dlq-inv-section-body">
+                  <div class="dlq-inv-empty">No active incidents — system is healthy</div>
+                </div>
+                <div class="dlq-inv-section-label">Root cause analysis</div>
+                <div id="root-causes" class="dlq-inv-section-body">
+                  <div class="dlq-inv-empty">No root causes identified</div>
+                </div>
+              </div>
+
+              <div class="dlq-inv-side">
+                <div class="dlq-inv-section-label">Failure breakdown</div>
+                <div id="failure-breakdown" class="failure-breakdown dlq-inv-section-body"></div>
+                <div class="dlq-inv-section-label">Top failing destinations</div>
+                <div id="top-destinations" class="dlq-inv-section-body">
+                  <div class="dlq-inv-empty">No data</div>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- Ghost IDs: JS writes to these, not displayed -->
+            <div style="display:none" aria-hidden="true">
+              <div id="health-score-circle">
+                <div class="dlq-score-bar-wrap"><div id="dlq-score-bar"></div></div>
+                <span id="dlq-score-number"></span>
+              </div>
+              <div id="trend-graph"></div>
+              <span id="trend-state"></span>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════
+             Audit page
+             ══════════════════════════════════════════ -->
+        <div class="page" id="page-audit">
+          <div class="page-hdr">
+            <div>
+              <div class="page-title">Audit</div>
+              <div class="page-subtitle" style="margin-bottom:0">Complete history — every configuration change, team action, delivery event, and incident.</div>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="refreshAuditTab()">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
+              Refresh
+            </button>
+          </div>
+          <div class="tabs" style="margin-bottom:16px">
+            <div class="tab active" data-audittab="log" onclick="switchAuditTab('log')">Log</div>
+            <div class="tab" data-audittab="timeline" onclick="switchAuditTab('timeline')">Timeline</div>
+          </div>
+
+          <!-- Log tab -->
+          <div id="audit-tab-log">
+            <div class="table-wrap">
+              <div class="table-toolbar">
+                <select class="select" style="width:180px" id="audit-type-filter" onchange="loadAuditLog()">
+                  <option value="">All resource types</option>
+                  <option value="destination">Destination</option>
+                  <option value="project">Project</option>
+                  <option value="team">Team</option>
+                  <option value="alert">Alert</option>
+                  <option value="replay">Replay</option>
+                  <option value="settings">Settings</option>
+                </select>
+                <select class="select" style="width:160px" id="audit-action-filter" onchange="loadAuditLog()">
+                  <option value="">All actions</option>
+                  <option value="create">Create</option>
+                  <option value="update">Update</option>
+                  <option value="delete">Delete</option>
+                  <option value="login">Login</option>
+                  <option value="invite">Invite</option>
+                  <option value="replay">Replay</option>
+                </select>
+              </div>
+              <div id="audit-table-wrap">
+                <div class="empty-state">
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                  <div class="title">No audit entries yet</div>
+                  <div class="desc">Actions taken by team members will appear here</div>
+                </div>
+              </div>
+              <div class="pagination" id="audit-pagination"></div>
+            </div>
+          </div>
+
+          <!-- Timeline tab -->
+          <div id="audit-tab-timeline" style="display:none">
+            <div style="display:flex;gap:6px;margin-bottom:16px">
+              <button class="tl-filter active" data-tlf="all" onclick="filterTimeline(this,'all')">All</button>
+              <button class="tl-filter" data-tlf="delivery" onclick="filterTimeline(this,'delivery')">Deliveries</button>
+              <button class="tl-filter" data-tlf="incident" onclick="filterTimeline(this,'incident')">Incidents</button>
+              <button class="tl-filter" data-tlf="config" onclick="filterTimeline(this,'config')">Config</button>
+              <button class="tl-filter" data-tlf="replay" onclick="filterTimeline(this,'replay')">Replays</button>
+            </div>
+            <div id="timeline-body">
+              <div style="padding:40px;text-align:center;color:var(--text3);font-size:13px">Loading timeline…</div>
+            </div>
+            <div class="pagination" id="timeline-pagination"></div>
+          </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════
+             Recovery Center
+             ══════════════════════════════════════════ -->
+        <div class="page" id="page-recovery">
+          <div class="page-hdr">
+            <div>
+              <div class="page-title">Fix &amp; Replay</div>
+              <div class="page-subtitle" style="margin-bottom:0">Everything that needs your attention, in one place. Investigate failures and replay events without hunting across tabs.</div>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="loadRecovery()">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
+              Refresh
+            </button>
+          </div>
+          <div class="tabs" style="margin-bottom:16px">
+            <div class="tab active" data-rtab="failures" onclick="switchRecoveryTab('failures')">Failures</div>
+            <div class="tab" data-rtab="incidents" onclick="switchRecoveryTab('incidents')">Incidents</div>
+            <div class="tab" data-rtab="dlq" onclick="switchRecoveryTab('dlq')">DLQ</div>
+            <div class="tab" data-rtab="replays" onclick="switchRecoveryTab('replays')">Replays</div>
+          </div>
+          <div id="recovery-failures" class="recovery-tab">
+            <div id="recovery-failures-body">
+              <div class="empty-state">
+                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg>
+                <div class="title">No recent failures</div>
+                <div class="desc">Failed deliveries appear here for triage and replay</div>
+              </div>
+            </div>
+          </div>
+          <div id="recovery-incidents" class="recovery-tab" style="display:none">
+            <div id="recovery-incidents-body">
+              <div class="empty-state">
+                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                <div class="title">No active incidents</div>
+                <div class="desc">System is healthy</div>
+              </div>
+            </div>
+          </div>
+          <div id="recovery-dlq" class="recovery-tab" style="display:none">
+            <div id="recovery-dlq-body">
+              <div class="empty-state">
+                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
+                <div class="title">DLQ is empty</div>
+                <div class="desc">All events delivered successfully</div>
+              </div>
+            </div>
+          </div>
+          <div id="recovery-replays" class="recovery-tab" style="display:none">
+            <div id="recovery-replays-body">
+              <div class="empty-state">
+                <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
+                <div class="title">No replay history</div>
+                <div class="desc">Bulk replay jobs appear here</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════
+             Insights — Weekly reliability briefing
+             ══════════════════════════════════════════ -->
+        <div class="page" id="page-insights">
+
+          <!-- Tabs + actions -->
+          <div class="ins-tabs-bar">
+            <button class="ins-tab active" id="ins-tab-this-week" onclick="switchInsightTab('this-week')">This Week</button>
+            <button class="ins-tab" id="ins-tab-archive" onclick="switchInsightTab('archive')">Archive</button>
+            <div style="flex:1"></div>
+            <button class="btn btn-ghost btn-sm" id="ins-generate-btn" onclick="insightForceGenerate()" style="font-size:11px;gap:6px">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
+              Regenerate
+            </button>
+          </div>
+
+          <!-- This Week panel: all content rendered by JS into #ins-report -->
+          <div id="ins-panel-this-week" class="ins-panel">
+            <div id="ins-loading" class="ins-loading-state">
+              <div class="ins-spinner"></div>
+              <div class="ins-loading-label">Generating your weekly briefing…</div>
+            </div>
+            <div id="ins-report" style="display:none"></div>
+          </div>
+
+          <!-- Archive panel -->
+          <div id="ins-panel-archive" class="ins-panel" style="display:none">
+            <div id="ins-archive-list"></div>
+          </div>
+
+        </div><!-- /page-insights -->
+
+        <!-- ══════════════════════════════════════════
+             Pipeline — animated vertical flow
+             ══════════════════════════════════════════ -->
+        <div class="page" id="page-pipeline">
+          <div class="page-hdr">
+            <div>
+              <div class="page-title">Event Flow</div>
+              <div class="page-subtitle" style="margin-bottom:0">Watch events move through Relora in real time — from ingest to delivery.</div>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="loadPipeline()">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
+              Refresh
+            </button>
+          </div>
+
+          <!-- Two-column: vertical flow (left) + stats (right) -->
+          <div class="pipe-layout">
+
+            <!-- Vertical animated pipeline -->
+            <div class="pipe-flow-col">
+
+              <div class="pipe-node" id="pipe-node-receive">
+                <div class="pipe-node-glow"></div>
+                <div class="pipe-node-dot"></div>
+                <div class="pipe-node-body">
+                  <div class="pipe-node-label">RECEIVE</div>
+                  <div class="pipe-node-val" id="pipe-receive">—</div>
+                  <div class="pipe-node-sub">events / 24h inbound</div>
+                </div>
+              </div>
+
+              <div class="pipe-conn">
+                <div class="pipe-dot" style="animation-delay:0s"></div>
+                <div class="pipe-dot" style="animation-delay:.55s"></div>
+                <div class="pipe-dot" style="animation-delay:1.1s"></div>
+              </div>
+
+              <div class="pipe-node" id="pipe-node-persist">
+                <div class="pipe-node-glow"></div>
+                <div class="pipe-node-dot"></div>
+                <div class="pipe-node-body">
+                  <div class="pipe-node-label">PERSIST</div>
+                  <div class="pipe-node-val" id="pipe-persist">—</div>
+                  <div class="pipe-node-sub">stored to queue</div>
+                </div>
+              </div>
+
+              <div class="pipe-conn">
+                <div class="pipe-dot" style="animation-delay:0s"></div>
+                <div class="pipe-dot" style="animation-delay:.55s"></div>
+                <div class="pipe-dot" style="animation-delay:1.1s"></div>
+              </div>
+
+              <div class="pipe-node" id="pipe-node-relay">
+                <div class="pipe-node-glow"></div>
+                <div class="pipe-node-dot"></div>
+                <div class="pipe-node-body">
+                  <div class="pipe-node-label">RELAY</div>
+                  <div class="pipe-node-val" id="pipe-relay">—</div>
+                  <div class="pipe-node-sub">delivered 24h</div>
+                </div>
+              </div>
+
+              <div class="pipe-conn">
+                <div class="pipe-dot pipe-dot--warn" style="animation-delay:0s"></div>
+                <div class="pipe-dot pipe-dot--warn" style="animation-delay:.55s"></div>
+                <div class="pipe-dot pipe-dot--warn" style="animation-delay:1.1s"></div>
+              </div>
+
+              <div class="pipe-node pipe-node--warn" id="pipe-node-retry">
+                <div class="pipe-node-glow"></div>
+                <div class="pipe-node-dot"></div>
+                <div class="pipe-node-body">
+                  <div class="pipe-node-label">RETRY</div>
+                  <div class="pipe-node-val" id="pipe-retry">—</div>
+                  <div class="pipe-node-sub">retrying now</div>
+                </div>
+              </div>
+
+              <div class="pipe-conn">
+                <div class="pipe-dot pipe-dot--danger" style="animation-delay:0s"></div>
+                <div class="pipe-dot pipe-dot--danger" style="animation-delay:.55s"></div>
+                <div class="pipe-dot pipe-dot--danger" style="animation-delay:1.1s"></div>
+              </div>
+
+              <div class="pipe-node pipe-node--danger" id="pipe-node-dlq">
+                <div class="pipe-node-glow"></div>
+                <div class="pipe-node-dot"></div>
+                <div class="pipe-node-body">
+                  <div class="pipe-node-label">DLQ</div>
+                  <div class="pipe-node-val" id="pipe-dlq">—</div>
+                  <div class="pipe-node-sub">dead letter queue</div>
+                </div>
+              </div>
+
+              <div class="pipe-conn">
+                <div class="pipe-dot" style="animation-delay:0s"></div>
+                <div class="pipe-dot" style="animation-delay:.55s"></div>
+                <div class="pipe-dot" style="animation-delay:1.1s"></div>
+              </div>
+
+              <div class="pipe-node" id="pipe-node-replay">
+                <div class="pipe-node-glow"></div>
+                <div class="pipe-node-dot"></div>
+                <div class="pipe-node-body">
+                  <div class="pipe-node-label">REPLAY</div>
+                  <div class="pipe-node-val" id="pipe-replay-count">—</div>
+                  <div class="pipe-node-sub">replayed total</div>
+                </div>
+              </div>
+
+            </div><!-- /pipe-flow-col -->
+
+            <!-- Stats cards -->
+            <div class="pipe-stats-col">
+              <div class="card">
+                <div class="card-header"><div class="card-title">Ingest</div></div>
+                <div class="kv-list">
+                  <div class="kv-row"><span class="kv-key">Worker status</span><span class="kv-val" id="pipe-worker-status">—</span></div>
+                  <div class="kv-row"><span class="kv-key">Queue depth</span><span class="kv-val" id="pipe-queue-depth">—</span></div>
+                  <div class="kv-row"><span class="kv-key">Success rate 24h</span><span class="kv-val" id="pipe-success-rate">—</span></div>
+                  <div class="kv-row"><span class="kv-key">P95 latency</span><span class="kv-val" id="pipe-p95">—</span></div>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card-header"><div class="card-title">Destinations</div></div>
+                <div class="kv-list" id="pipe-dest-list">
+                  <div style="padding:16px;color:var(--text3);font-size:12px">No destinations configured</div>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card-header"><div class="card-title">Failure Pressure</div></div>
+                <div class="kv-list">
+                  <div class="kv-row"><span class="kv-key">DLQ depth</span><span class="kv-val" id="pipe-dlq-detail">—</span></div>
+                  <div class="kv-row"><span class="kv-key">Circuits open</span><span class="kv-val" id="pipe-cb-detail">—</span></div>
+                  <div class="kv-row"><span class="kv-key">Open incidents</span><span class="kv-val" id="pipe-inc-detail">—</span></div>
+                  <div class="kv-row"><span class="kv-key">Stuck jobs</span><span class="kv-val" id="pipe-stuck-detail">—</span></div>
+                </div>
+                <div style="padding:0 16px 16px;margin-top:8px">
+                  <button class="btn btn-secondary btn-sm" style="width:100%" onclick="navTo('recovery')">Open Recovery Center →</button>
+                </div>
+              </div>
+            </div><!-- /pipe-stats-col -->
+
+          </div><!-- /pipe-layout -->
+
+          <!-- Destination performance — appears when destinations exist -->
+          <div id="pipe-dest-section" style="display:none;margin-top:28px">
+            <div class="pipe-section-label">Destination Performance</div>
+            <div class="tabs" id="pipe-dest-tabs" style="margin-bottom:16px"></div>
+            <div id="pipe-dest-content"></div>
+          </div>
+
+        </div><!-- /page-pipeline -->
+
+
+      </div><!-- /content -->
+
+      <!-- ── Detail panel ── -->
+      <div class="detail-panel hidden" id="detail-panel">
+        <div class="panel-header">
+          <div>
+            <div style="font-size:13px;font-weight:600" id="panel-webhook-id">—</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px" id="panel-created-at">—</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="closePanel()" style="padding:4px 8px">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="panel-body">
+          <div class="panel-section">
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+              <span id="panel-status-badge"></span>
+              <button class="btn btn-xs btn-secondary" id="panel-replay-btn" onclick="replaySelected()">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
+                Replay
+              </button>
+            </div>
+            <div class="kv-list">
+              <div class="kv-row"><span class="kv-key">Destination</span><span class="kv-val" id="panel-dest-url"></span></div>
+              <div class="kv-row"><span class="kv-key">Event ID</span><span class="kv-val" id="panel-event-id"></span></div>
+              <div class="kv-row"><span class="kv-key">Tenant</span><span class="kv-val" id="panel-tenant-id"></span></div>
+              <div class="kv-row"><span class="kv-key">Retries</span><span class="kv-val" id="panel-retries"></span></div>
+              <div class="kv-row"><span class="kv-key">Idempotency Key</span><span class="kv-val" id="panel-idempotency"></span></div>
+              <div class="kv-row"><span class="kv-key">Ordering Key</span><span class="kv-val" id="panel-ordering-key"></span></div>
+            </div>
+          </div>
+          <div class="panel-section">
+            <div class="panel-section-title">Payload</div>
+            <div class="json-view" id="panel-payload"></div>
+          </div>
+          <div class="panel-section">
+            <div class="panel-section-title">Delivery Attempts</div>
+            <div class="timeline" id="panel-timeline"></div>
+          </div>
+          <div class="panel-section">
+            <div class="panel-section-title">Inbound Headers</div>
+            <div class="json-view" id="panel-headers"></div>
+          </div>
+        </div>
+      </div>
+    </div><!-- /content+panel -->
+  </div><!-- /main-body -->
+</div><!-- /app -->
+
+<div id="toast-container"></div>
+
+<!-- ══ Modals ══ -->
+
+<div class="modal-overlay" id="modal-new-project">
+  <div class="modal">
+    <div class="modal-header"><div class="modal-title">New Project</div><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-new-project')" style="padding:4px 8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+    <div class="modal-body">
+      <div class="input-group"><label class="input-label">Project Name</label><input class="input" id="new-project-name" placeholder="My App"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-new-project')">Cancel</button>
+      <button class="btn btn-primary" onclick="createProject()">Create</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-dest">
+  <div class="modal" style="max-width:680px">
+    <div class="modal-header"><div class="modal-title" id="dest-modal-title">New Destination</div><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-dest')" style="padding:4px 8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+    <div class="modal-body">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="input-group" style="grid-column:1/-1"><label class="input-label">Name *</label><input class="input" id="dest-name" placeholder="My App Webhook"></div>
+        <div class="input-group" style="grid-column:1/-1"><label class="input-label">URL *</label><input class="input" id="dest-url" placeholder="https://myapp.com/webhooks"></div>
+        <div class="input-group"><label class="input-label">Max Retries</label><input class="input" type="number" id="dest-max-retries" value="5"></div>
+        <div class="input-group"><label class="input-label">Backoff Base (seconds)</label><input class="input" type="number" id="dest-backoff" value="30"></div>
+        <div class="input-group" style="grid-column:1/-1"><label class="input-label">Filter Expression</label><input class="input" id="dest-filter" placeholder="event.type == 'payment.succeeded'"></div>
+        <div class="input-group" style="grid-column:1/-1"><label class="input-label">Ordering Key Field (dot-path)</label><input class="input" id="dest-ordering-key" placeholder="data.customer_id"></div>
+        <div class="input-group" style="grid-column:1/-1"><label class="input-label">Webhook Secret (Standard Webhooks signing)</label><input class="input" id="dest-secret" placeholder="whsec_… or leave blank"></div>
+        <div class="input-group" style="grid-column:1/-1">
+          <label class="input-label">Transform Type</label>
+          <select class="select" id="dest-transform-type" onchange="toggleTransformEditor()">
+            <option value="none">None — deliver payload as-is</option>
+            <option value="json_map">JSON Field Map — rename / pick fields</option>
+            <option value="javascript">JavaScript — full transform function</option>
+          </select>
+        </div>
+        <div id="dest-transform-json-wrap" style="display:none;grid-column:1/-1">
+          <div class="input-group">
+            <label class="input-label">Field Map JSON <span style="color:var(--text3);font-weight:400">({"output_field": "source.path"})</span></label>
+            <textarea class="textarea code-editor" id="dest-transform-map" rows="5" placeholder='{"order_id": "data.object.id", "amount": "data.object.amount"}'></textarea>
+          </div>
+        </div>
+        <div id="dest-transform-js-wrap" style="display:none;grid-column:1/-1">
+          <div class="input-group">
+            <label class="input-label">JavaScript Transform</label>
+            <textarea class="textarea code-editor" id="dest-transform-code" rows="8" placeholder="return { order_id: payload.data.object.id, amount: payload.data.object.amount };"></textarea>
+          </div>
+          <div style="font-size:12px;color:var(--warn);margin-top:-4px">Requires Deno in the worker container.</div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-dest')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveDestination()">Save Destination</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-dest-sla">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header"><div class="modal-title" id="sla-modal-title">Delivery SLA</div><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-dest-sla')" style="padding:4px 8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+    <div class="modal-body" id="sla-modal-body"><div style="color:var(--text3);text-align:center;padding:32px">Loading…</div></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-alert">
+  <div class="modal">
+    <div class="modal-header"><div class="modal-title">New Alert Channel</div><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-alert')" style="padding:4px 8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+    <div class="modal-body">
+      <div class="input-group"><label class="input-label">Name</label><input class="input" id="alert-name" placeholder="#ops-alerts"></div>
+      <div class="input-group">
+        <label class="input-label">Channel Type</label>
+        <select class="select" id="alert-type" onchange="toggleAlertFields()">
+          <option value="slack">Slack</option>
+          <option value="email">Email (SMTP)</option>
+        </select>
+      </div>
+      <div id="alert-slack-fields">
+        <div class="input-group"><label class="input-label">Slack Webhook URL</label><input class="input" id="alert-slack-url" placeholder="https://hooks.slack.com/services/…"></div>
+      </div>
+      <div id="alert-email-fields" style="display:none">
+        <div class="input-group"><label class="input-label">SMTP Host</label><input class="input" id="alert-smtp-host" placeholder="smtp.gmail.com"></div>
+        <div class="input-group"><label class="input-label">SMTP Port</label><input class="input" type="number" id="alert-smtp-port" value="587"></div>
+        <div class="input-group"><label class="input-label">Username</label><input class="input" id="alert-smtp-user"></div>
+        <div class="input-group"><label class="input-label">Password</label><input class="input" type="password" id="alert-smtp-pass"></div>
+        <div class="input-group"><label class="input-label">From</label><input class="input" id="alert-smtp-from"></div>
+        <div class="input-group"><label class="input-label">To</label><input class="input" id="alert-smtp-to"></div>
+      </div>
+      <div style="border-top:1px solid var(--border);margin-top:4px;padding-top:16px">
+        <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:12px">Alert Triggers <span style="font-weight:400;color:var(--text3)">(leave blank to alert on any DLQ event)</span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="input-group" style="margin-bottom:0">
+            <label class="input-label">DLQ depth ≥</label>
+            <input class="input" type="number" id="alert-dlq-threshold" placeholder="e.g. 10" min="1">
+            <div style="font-size:11px;color:var(--text3);margin-top:3px">Fire when dead letter queue hits this count</div>
+          </div>
+          <div class="input-group" style="margin-bottom:0">
+            <label class="input-label">Success rate &lt;</label>
+            <input class="input" type="number" id="alert-error-threshold" placeholder="e.g. 95" min="0" max="100" step="0.1">
+            <div style="font-size:11px;color:var(--text3);margin-top:3px">Fire when 24h success rate drops below this %</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-alert')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveAlert()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-invite">
+  <div class="modal">
+    <div class="modal-header"><div class="modal-title">Invite Team Member</div><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-invite')" style="padding:4px 8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+    <div class="modal-body">
+      <div class="input-group"><label class="input-label">Email</label><input class="input" id="invite-email" placeholder="colleague@company.com"></div>
+      <div class="input-group">
+        <label class="input-label">Role</label>
+        <select class="select" id="invite-role">
+          <option value="viewer">Viewer</option>
+          <option value="admin">Admin</option>
+          <option value="owner">Owner</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-invite')">Cancel</button>
+      <button class="btn btn-primary" onclick="inviteMember()">Send Invite</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- Simulator Modal -->
+<div class="modal-overlay" id="modal-sim">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <div class="modal-title">Send Test Event</div>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('modal-sim')" style="padding:4px 8px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="input-group">
+        <label class="input-label">Destination</label>
+        <select class="select" id="sim-destination"></select>
+      </div>
+      <div class="input-group">
+        <label class="input-label">Provider</label>
+        <select class="select" id="sim-provider" onchange="updateSimEventTypes()">
+          <option value="stripe">Stripe</option>
+          <option value="github">GitHub</option>
+          <option value="shopify">Shopify</option>
+        </select>
+      </div>
+      <div class="input-group">
+        <label class="input-label">Event Type</label>
+        <select class="select" id="sim-event-type"></select>
+      </div>
+      <div class="input-group">
+        <label class="input-label">Outcome</label>
+        <select class="select" id="sim-outcome">
+          <option value="real">Real delivery — use destination URL</option>
+          <option value="success">Force success — always 200 ✓</option>
+          <option value="fail">Force fail — always 500, exhausts retries → DLQ</option>
+          <option value="flaky">Flaky — fails first attempt, recovers on second</option>
+        </select>
+      </div>
+      <div id="sim-result" style="display:none;margin-top:12px;padding:10px 12px;background:var(--surface2);border-radius:6px;font-size:12px;font-family:var(--mono);color:var(--text2);word-break:break-all"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('modal-sim')">Cancel</button>
+      <button class="btn btn-primary" id="sim-send-btn" onclick="runSimulate()">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Send
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Event Journey Modal -->
+<div class="modal-overlay" id="journey-modal" onclick="if(event.target===this)this.style.display='none'">
+  <div class="modal" style="max-width:720px">
+    <div class="modal-header">
+      <div class="modal-title">Event Journey</div>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('journey-modal').style.display='none'" style="padding:4px 8px">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" id="journey-body" style="max-height:60vh;overflow-y:auto"></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
