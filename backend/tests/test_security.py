@@ -1,6 +1,7 @@
-from unittest.mock import Mock
+from unittest.mock import Mock, patch, call
 import asyncio
 import hmac
+import socket
 import time
 from hashlib import sha256
 
@@ -12,10 +13,14 @@ from app.routing import apply_transform, event_matches_filter, extract_event_id
 from app.security import require_api_key, validate_destination_url
 from app.signatures import verify_webhook_signature
 
+# Fake public DNS response: 93.184.216.34 is example.com's real IP (public, non-private)
+_PUBLIC_ADDRINFO = [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0))]
+
 
 def test_validate_destination_url_accepts_public_url(monkeypatch):
     monkeypatch.setattr(settings, "ALLOW_PRIVATE_DESTINATIONS", False)
     monkeypatch.setattr(settings, "DESTINATION_HOST_ALLOWLIST", "")
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **kw: _PUBLIC_ADDRINFO)
 
     assert validate_destination_url("https://example.com/webhook") == "https://example.com/webhook"
 
@@ -47,6 +52,7 @@ def test_validate_destination_url_allows_private_host_for_local_demo(monkeypatch
 def test_validate_destination_url_enforces_allowlist(monkeypatch):
     monkeypatch.setattr(settings, "ALLOW_PRIVATE_DESTINATIONS", True)
     monkeypatch.setattr(settings, "DESTINATION_HOST_ALLOWLIST", "hooks.example.com")
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **kw: _PUBLIC_ADDRINFO)
 
     with pytest.raises(HTTPException) as exc:
         validate_destination_url("https://other.example.com/webhook")
@@ -63,6 +69,7 @@ def test_destination_host_allowlist_parses_csv(monkeypatch):
 def test_require_api_key_noops_when_unset(monkeypatch):
     monkeypatch.setattr(settings, "RELORA_API_KEY", "")
     monkeypatch.setattr(settings, "RELORA_API_KEYS", "")
+    monkeypatch.setattr(settings, "ENVIRONMENT", "development")
     request = Mock()
     request.headers = {}
 
@@ -143,3 +150,100 @@ def test_verify_stripe_signature(monkeypatch):
     request.headers = {"Stripe-Signature": f"t={timestamp},v1={signature}"}
 
     assert verify_webhook_signature("stripe", request, body) is None
+
+
+# ---------------------------------------------------------------------------
+# WebSocket auth bypass
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_websocket_closes_4001_without_token_or_valid_project_key():
+    """
+    A WebSocket connection with an unknown project_key and no JWT token must
+    be closed with code 4001 (Unauthorized).
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    # DB returns no project for the given key
+    mock_db = AsyncMock()
+    no_project = MagicMock()
+    no_project.scalar_one_or_none.return_value = None
+    mock_db.execute = AsyncMock(return_value=no_project)
+
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=mock_db)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+
+    mock_ws = AsyncMock()
+    mock_ws.close = AsyncMock()
+
+    # Patch at source — the function imports async_session from app.db at call time
+    from app.routers.system import websocket_endpoint
+    with patch("app.db.async_session", return_value=ctx):
+        await websocket_endpoint(websocket=mock_ws, project_key="unknown-key", token=None)
+
+    mock_ws.close.assert_called_once_with(code=4001)
+
+
+@pytest.mark.anyio
+async def test_websocket_closes_4001_with_invalid_jwt():
+    """
+    A WebSocket connection with an invalid/expired JWT and an unknown project key
+    must be rejected with code 4001.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock_db = AsyncMock()
+    no_project = MagicMock()
+    no_project.scalar_one_or_none.return_value = None
+    mock_db.execute = AsyncMock(return_value=no_project)
+
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=mock_db)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+
+    mock_ws = AsyncMock()
+    mock_ws.close = AsyncMock()
+
+    from app.routers.system import websocket_endpoint
+    with patch("app.db.async_session", return_value=ctx), \
+         patch("app.auth.decode_access_token", return_value=None):
+        await websocket_endpoint(websocket=mock_ws, project_key="unknown-key", token="bad.jwt.token")
+
+    mock_ws.close.assert_called_once_with(code=4001)
+
+
+@pytest.mark.anyio
+async def test_websocket_accepts_valid_project_api_key():
+    """
+    A WebSocket connection where project_key matches a real project api_key
+    (SDK / programmatic use) must be accepted and NOT close with 4001.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock_project = MagicMock()
+
+    mock_db = AsyncMock()
+    found_project = MagicMock()
+    found_project.scalar_one_or_none.return_value = mock_project
+    mock_db.execute = AsyncMock(return_value=found_project)
+
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=mock_db)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+
+    # send_text raises to break the keep-alive loop immediately
+    mock_ws = AsyncMock()
+    mock_ws.close = AsyncMock()
+    mock_ws.send_text = AsyncMock(side_effect=Exception("disconnect"))
+
+    from app.routers.system import websocket_endpoint
+    with patch("app.db.async_session", return_value=ctx), \
+         patch("app.routers.system.ws_manager") as mock_manager:
+        mock_manager.connect = AsyncMock()
+        mock_manager.disconnect = AsyncMock()
+        await websocket_endpoint(websocket=mock_ws, project_key="hk_live_abc123", token=None)
+
+    # close(4001) must NOT have been called — connection was accepted
+    for c in mock_ws.close.call_args_list:
+        assert c != call(code=4001), "WS was closed with 4001 for a valid project key"

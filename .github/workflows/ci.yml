@@ -65,16 +65,18 @@ jobs:
 
       - name: Start fake downstream (background)
         run: |
-          uvicorn scripts.fake_downstream:app --host 0.0.0.0 --port 9000 &
+          uvicorn scripts.fake_downstream:app --host 0.0.0.0 --port 9000 > /tmp/downstream.log 2>&1 &
           for i in $(seq 1 10); do curl -sf http://localhost:9000/health && break || sleep 1; done
+          curl -sf http://localhost:9000/health || { echo "=== downstream startup log ==="; cat /tmp/downstream.log; exit 1; }
 
       # AUTO_CREATE_TABLES=true (from job env) makes the API call create_all() on startup,
       # building the full schema from models on the fresh CI Postgres instance.
       # This is intentional: committed migrations may lag behind model changes locally.
       - name: Start Relora API (background)
         run: |
-          uvicorn app.api_main:app --host 0.0.0.0 --port 8000 &
+          uvicorn app.api_main:app --host 0.0.0.0 --port 8000 > /tmp/api.log 2>&1 &
           for i in $(seq 1 30); do curl -sf http://localhost:8000/health && break || sleep 1; done
+          curl -sf http://localhost:8000/health || { echo "=== API startup log ==="; cat /tmp/api.log; exit 1; }
 
       - name: Start delivery worker (background)
         run: |

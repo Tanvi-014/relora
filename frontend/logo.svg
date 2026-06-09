@@ -1,15 +1,5 @@
-<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title">
   <title id="title">Relora logo</title>
-  <desc id="desc">A routed lightning mark inside a rounded square.</desc>
   <rect width="128" height="128" rx="28" fill="#0B0F14"/>
-  <rect x="10" y="10" width="108" height="108" rx="22" fill="url(#paint0_linear)" stroke="rgba(255,255,255,.14)" stroke-width="2"/>
-  <path d="M75.5 18L31 72.5h36.5L58 110l39.5-51H63L75.5 18Z" fill="#F8FAFC"/>
-  <path d="M34 85.5C46.5 75.5 62 73.5 81.5 80C86 81.5 90.5 79.5 93 75.5" stroke="#8AE8C7" stroke-width="5" stroke-linecap="round"/>
-  <defs>
-    <linearGradient id="paint0_linear" x1="13" y1="8" x2="119" y2="120" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#2563EB"/>
-      <stop offset=".52" stop-color="#0F766E"/>
-      <stop offset="1" stop-color="#151B2A"/>
-    </linearGradient>
-  </defs>
+  <polyline points="14,64 40,64 52,20 64,108 76,64 114,64" fill="none" stroke="#00D47E" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

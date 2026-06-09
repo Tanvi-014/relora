@@ -153,6 +153,13 @@ async def require_api_key(request: Request) -> str:
     """Legacy API-key auth for backward compatibility."""
     tenants = settings.api_key_tenants
     if not tenants:
+        if settings.is_production:
+            # No keys configured in production — reject rather than allow all traffic
+            # through as a shared 'anonymous' tenant.
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing or invalid API key",
+            )
         return "anonymous"
     key = request.headers.get("X-Relora-API-Key", "")
     tenant_id = tenants.get(key)

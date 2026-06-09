@@ -27,7 +27,7 @@ async def _get_project_by_api_key(db: AsyncSession, api_key: str) -> Project:
     result = await db.execute(select(Project).where(Project.api_key == api_key))
     project = result.scalar_one_or_none()
     if not project:
-        return Project(id=_uuid_mod.uuid4(), name="default", api_key=api_key)
+        raise HTTPException(404, "Project not found for this API key")
     return project
 
 
@@ -179,16 +179,17 @@ async def get_dashboard(
     tf = Webhook.tenant_id == tenant_id
 
     # ── Counts ──
+    ns = Webhook.is_simulation == False  # noqa: E712
     completed_24h, failed_24h, total_24h = await asyncio.gather(
         db.scalar(select(func.count(Webhook.id)).where(
-            tf, Webhook.status == "completed",
+            tf, ns, Webhook.status == "completed",
             Webhook.updated_at >= text("NOW() - INTERVAL '24 hours'"),
         )),
         db.scalar(select(func.count(Webhook.id)).where(
-            tf, Webhook.status == "failed",
+            tf, ns, Webhook.status == "failed",
         )),
         db.scalar(select(func.count(Webhook.id)).where(
-            tf, Webhook.updated_at >= text("NOW() - INTERVAL '24 hours'"),
+            tf, ns, Webhook.updated_at >= text("NOW() - INTERVAL '24 hours'"),
         )),
     )
     completed_24h = completed_24h or 0
@@ -196,7 +197,7 @@ async def get_dashboard(
     total_24h = total_24h or 0
     terminal_24h = completed_24h + (
         await db.scalar(select(func.count(Webhook.id)).where(
-            tf, Webhook.status == "failed",
+            tf, ns, Webhook.status == "failed",
             Webhook.updated_at >= text("NOW() - INTERVAL '24 hours'"),
         )) or 0
     )
@@ -277,7 +278,7 @@ async def get_dashboard(
         LEFT JOIN delivery_attempts da ON da.webhook_id = w.id
             AND da.attempt_number = w.retry_count
         LEFT JOIN destinations d ON d.id = w.destination_id
-        WHERE w.tenant_id = :tid AND w.status = 'failed'
+        WHERE w.tenant_id = :tid AND w.status = 'failed' AND w.is_simulation = false
         ORDER BY w.updated_at DESC
         LIMIT 8
         """),
@@ -313,6 +314,7 @@ async def get_dashboard(
         LEFT JOIN destinations d ON d.id = w.destination_id
         WHERE w.tenant_id = :tid
           AND w.status IN ('completed', 'failed')
+          AND w.is_simulation = false
           AND w.updated_at >= NOW() - INTERVAL '24 hours'
         ORDER BY w.updated_at DESC
         LIMIT 20
@@ -339,6 +341,7 @@ async def get_dashboard(
             COUNT(*) FILTER (WHERE status = 'failed') AS failed
         FROM webhooks
         WHERE tenant_id = :tid
+          AND is_simulation = false
           AND updated_at >= NOW() - INTERVAL '24 hours'
         GROUP BY hour
         ORDER BY hour ASC
@@ -507,17 +510,52 @@ async def websocket_endpoint(
     project_key: str,
     token: Optional[str] = Query(None),
 ):
-    # Validate token from query param or cookie
-    from app.auth import decode_access_token
-    valid = False
-    if token:
-        payload = decode_access_token(token)
-        valid = payload is not None
-    if not valid:
-        # Allow anonymous connections for API-key tenants
-        valid = True  # dashboard connects with project API key as project_key
+    """
+    Authenticated WebSocket stream.
 
-    if not valid:
+    Accepts either:
+      - ?token=<JWT>  — validated, then the sub must be a member of the project
+        whose api_key == project_key.
+      - project_key is itself a valid project api_key (SDK / programmatic use).
+
+    Closes with 4001 if neither check passes.
+    """
+    from app.auth import decode_access_token
+    from app.db import async_session as _session
+    from sqlalchemy import select as _select
+
+    authorized = False
+
+    async with _session() as db:
+        if token:
+            payload = decode_access_token(token)
+            if payload:
+                user_id = payload.get("sub")
+                if user_id:
+                    # Verify the user is a member of the project identified by project_key
+                    pr = await db.execute(
+                        _select(Project).where(Project.api_key == project_key)
+                    )
+                    project = pr.scalar_one_or_none()
+                    if project:
+                        mr = await db.execute(
+                            _select(ProjectMember).where(
+                                ProjectMember.project_id == project.id,
+                                ProjectMember.user_id == user_id,
+                            )
+                        )
+                        if mr.scalar_one_or_none():
+                            authorized = True
+
+        if not authorized:
+            # Fallback: project_key is the raw project api_key (SDK clients)
+            pr = await db.execute(
+                _select(Project).where(Project.api_key == project_key)
+            )
+            if pr.scalar_one_or_none():
+                authorized = True
+
+    if not authorized:
         await websocket.close(code=4001)
         return
 

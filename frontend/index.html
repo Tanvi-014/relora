@@ -5,16 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Relora — Reliable Webhook Delivery</title>
 <meta name="description" content="The reliability layer between your event sources and your application. Instant accept, async retry, full visibility.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%23000000'/%3E%3Cpolyline points='2,12 7,12 9,5 11,19 13,12 22,12' fill='none' stroke='%2300D47E' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 /* ── Reset ── */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html{font-size:16px;scroll-behavior:smooth}
 body{
   font-family:'Inter',-apple-system,sans-serif;
-  background:#060810;color:#E8EFF7;line-height:1.6;
+  background:#000000;color:#E4EDF7;line-height:1.6;
   -webkit-font-smoothing:antialiased;
 }
 a{color:inherit;text-decoration:none}
@@ -23,19 +24,21 @@ img,svg{display:block}
 
 /* ── Tokens ── */
 :root{
-  --bg:#060810;
-  --surface:#0C1220;
-  --surface2:#101829;
-  --border:#1C2A3A;
-  --border2:#243344;
-  --green:#00D47E;
-  --amber:#E8A838;
-  --red:#E05252;
-  --text1:#E8EFF7;
-  --text2:#7A94AA;
-  --text3:#3D5468;
-  --mono:'JetBrains Mono',monospace;
-  --head:'Space Grotesk',-apple-system,sans-serif;
+  --bg:    #000000;
+  --sf:    #0E1420;
+  --sf2:   #131A28;
+  --bd:    #1E2C40;
+  --bd2:   #2E4060;
+  --green: #00D47E;
+  --amber: #F0A940;
+  --red:   #E25555;
+  --t1:    #E4EDF7;
+  --t2:    #7A94B2;
+  --t3:    #4A6382;
+  --mono:  'JetBrains Mono',monospace;
+  --head:  'Space Grotesk',-apple-system,sans-serif;
+  --body:  'Inter',-apple-system,sans-serif;
+  --r:     8px;
 }
 
 /* ── Layout ── */
@@ -46,7 +49,7 @@ img,svg{display:block}
 /* ── Scrollbar ── */
 ::-webkit-scrollbar{width:4px}
 ::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:#1C2A3A}
+::-webkit-scrollbar-thumb{background:var(--bd);border-radius:4px}
 
 /* ═══════════════════════════════
    NAV
@@ -54,50 +57,53 @@ img,svg{display:block}
 nav{
   position:sticky;top:0;z-index:100;
   height:60px;display:flex;align-items:center;
-  padding:0 28px;
-  background:#060810;
-  border-bottom:1px solid #1C2A3A;
+  padding:0 28px;gap:8px;
+  background:#0E1420;
+  border-bottom:1px solid #1E2C40;
+  box-shadow:0 1px 0 #1E2C40,0 2px 12px rgba(0,0,0,.35);
 }
 .nav-logo{
   display:flex;align-items:center;gap:10px;
   font-family:var(--head);font-size:15px;font-weight:700;
-  letter-spacing:-.3px;color:var(--text1);
-  flex-shrink:0;margin-right:40px;
+  letter-spacing:-.3px;color:var(--t1);
+  flex-shrink:0;margin-right:32px;
 }
-.nav-logo-hex{
-  width:30px;height:30px;
-  border:1px solid var(--green);
+.nav-logo-icon{
+  width:32px;height:32px;
+  border-radius:8px;
+  background:rgba(0,212,126,.1);
+  border:1px solid rgba(0,212,126,.3);
   color:var(--green);
   display:flex;align-items:center;justify-content:center;
   flex-shrink:0;
 }
 .nav-links{
-  display:flex;align-items:center;flex:1;
+  display:flex;align-items:center;flex:1;gap:2px;
 }
 @media(max-width:640px){.nav-links{display:none}}
 .nav-link{
-  padding:6px 14px;
-  font-family:var(--mono);font-size:12px;
-  color:var(--text3);
-  transition:color .1s;
+  padding:6px 12px;
+  font-family:var(--body);font-size:13px;font-weight:500;
+  color:var(--t3);border-radius:7px;
+  transition:background .1s,color .1s;
 }
-.nav-link:hover{color:var(--text2)}
-.nav-actions{display:flex;align-items:center;gap:12px;flex-shrink:0}
+.nav-link:hover{background:rgba(255,255,255,.05);color:var(--t2)}
+.nav-actions{display:flex;align-items:center;gap:10px;flex-shrink:0}
 .nav-signin{
-  font-family:var(--mono);font-size:12px;
-  color:var(--text3);padding:6px 12px;
-  transition:color .1s;
+  font-family:var(--body);font-size:13px;font-weight:500;
+  color:var(--t3);padding:6px 12px;border-radius:7px;
+  transition:background .1s,color .1s;
 }
-.nav-signin:hover{color:var(--text2)}
+.nav-signin:hover{background:rgba(255,255,255,.05);color:var(--t2)}
 .btn-nav{
   display:inline-flex;align-items:center;gap:7px;
   padding:8px 18px;
   font-family:var(--head);font-size:13px;font-weight:600;
-  background:var(--green);color:#060810;
-  border-radius:2px;
-  transition:opacity .12s;
+  background:var(--green);color:#000000;
+  border-radius:8px;
+  transition:opacity .12s,transform .1s;
 }
-.btn-nav:hover{opacity:.85}
+.btn-nav:hover{opacity:.9;transform:translateY(-1px)}
 
 /* ═══════════════════════════════
    HERO
@@ -110,10 +116,13 @@ nav{
 @media(max-width:920px){.hero-inner{grid-template-columns:1fr;gap:40px}}
 
 .hero-status{
-  display:flex;align-items:center;gap:8px;
+  display:inline-flex;align-items:center;gap:8px;
   font-family:var(--mono);font-size:11px;
-  color:var(--text3);margin-bottom:24px;
-  flex-wrap:wrap;
+  color:var(--t3);margin-bottom:24px;
+  background:rgba(0,212,126,.06);
+  border:1px solid rgba(0,212,126,.2);
+  border-radius:20px;
+  padding:5px 12px;
 }
 .status-dot{
   width:7px;height:7px;border-radius:50%;
@@ -121,61 +130,67 @@ nav{
   animation:blink 2s ease-in-out infinite;
 }
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
-.status-val{color:var(--green)}
-.status-sep{color:#1C2A3A;margin:0 4px}
+.status-val{color:var(--green);font-weight:500}
 
 h1{
   font-family:var(--head);
   font-size:clamp(2.2rem,4vw,3.4rem);
   font-weight:700;line-height:1.06;
   letter-spacing:-.04em;
-  color:var(--text1);margin-bottom:20px;
+  color:var(--t1);margin-bottom:20px;
 }
-h1 .muted{color:var(--text3)}
+h1 .muted{color:var(--t3)}
 
 .hero-sub{
-  font-size:15px;color:var(--text2);
+  font-size:15px;color:var(--t2);
   line-height:1.72;max-width:460px;
   margin-bottom:36px;
 }
 .hero-actions{display:flex;gap:12px;flex-wrap:wrap}
 .btn-primary{
   display:inline-flex;align-items:center;gap:8px;
-  padding:12px 26px;border-radius:2px;
+  padding:12px 24px;border-radius:8px;
   font-family:var(--head);font-size:14px;font-weight:600;
-  background:var(--green);color:#060810;
-  transition:opacity .12s;
+  background:var(--green);color:#000000;
+  transition:opacity .12s,transform .1s;
 }
-.btn-primary:hover{opacity:.85}
+.btn-primary:hover{opacity:.9;transform:translateY(-1px)}
 .btn-outline{
   display:inline-flex;align-items:center;gap:8px;
-  padding:12px 26px;border-radius:2px;
-  font-family:var(--mono);font-size:12px;
-  background:transparent;color:var(--text3);
-  border:1px solid #1C2A3A;
-  transition:color .12s,border-color .12s;
+  padding:12px 24px;border-radius:8px;
+  font-family:var(--body);font-size:13px;font-weight:500;
+  background:transparent;color:var(--t3);
+  border:1px solid var(--bd);
+  transition:color .12s,border-color .12s,background .12s;
 }
-.btn-outline:hover{color:var(--text2);border-color:#243344}
+.btn-outline:hover{color:var(--t2);border-color:var(--bd2);background:rgba(255,255,255,.04)}
 
 /* ── Log Panel ── */
 .log-panel{
-  background:#060810;
-  border:1px solid #1C2A3A;
-  border-top:2px solid var(--green);
+  background:var(--sf);
+  border:1px solid var(--bd);
+  border-radius:12px;
+  overflow:hidden;
+  box-shadow:0 8px 32px rgba(0,0,0,.4);
 }
 .log-header{
   display:flex;align-items:center;gap:8px;
   padding:10px 14px;
-  background:var(--surface);
-  border-bottom:1px solid #1C2A3A;
+  background:rgba(255,255,255,.03);
+  border-bottom:1px solid var(--bd);
 }
+.log-dots{display:flex;gap:5px}
+.log-dot{width:9px;height:9px;border-radius:50%}
 .log-title{
   font-family:var(--mono);font-size:11px;
-  color:var(--text3);letter-spacing:.03em;
+  color:var(--t3);letter-spacing:.03em;margin-left:4px;
 }
 .log-live{
   margin-left:auto;display:flex;align-items:center;gap:5px;
-  font-family:var(--mono);font-size:10px;color:var(--green);
+  font-family:var(--mono);font-size:10px;font-weight:600;
+  color:var(--green);letter-spacing:.06em;
+  background:rgba(0,212,126,.07);border:1px solid rgba(0,212,126,.2);
+  border-radius:12px;padding:3px 9px;
 }
 .log-live-dot{
   width:6px;height:6px;border-radius:50%;
@@ -187,22 +202,22 @@ h1 .muted{color:var(--text3)}
   display:flex;align-items:center;gap:10px;
   padding:7px 14px;
   font-family:var(--mono);font-size:11.5px;
-  border-bottom:1px solid rgba(28,42,58,.55);
+  border-bottom:1px solid rgba(30,44,64,.6);
 }
 .log-row:last-child{border-bottom:none}
-.log-row:hover{background:rgba(12,18,32,.7)}
+.log-row:hover{background:rgba(255,255,255,.025)}
 .glyph{flex-shrink:0;width:14px;text-align:center;font-size:12px}
 .glyph.ok{color:var(--green)}
 .glyph.retry{color:var(--amber)}
-.log-event{flex:1;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.log-ms{color:var(--text3);font-size:10.5px;flex-shrink:0;min-width:28px;text-align:right}
+.log-event{flex:1;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.log-ms{color:var(--t3);font-size:10.5px;flex-shrink:0;min-width:28px;text-align:right}
 
 /* ── Pipeline bar ── */
 .pipeline{
-  border-top:1px solid #1C2A3A;
-  border-bottom:1px solid #1C2A3A;
+  border-top:1px solid var(--bd);
+  border-bottom:1px solid var(--bd);
   margin-top:64px;
-  background:var(--surface);
+  background:var(--sf);
   overflow:hidden;
 }
 .pipeline-inner{
@@ -211,23 +226,23 @@ h1 .muted{color:var(--text3)}
   letter-spacing:.06em;
 }
 .pipeline-node{
-  flex:1;padding:18px 0;text-align:center;
-  color:var(--text3);
-  border-right:1px solid #1C2A3A;
-  transition:background .12s;
+  flex:1;padding:16px 0;text-align:center;
+  color:var(--t3);
+  border-right:1px solid var(--bd);
+  transition:background .12s;font-weight:500;
 }
 .pipeline-node:last-child{border-right:none}
-.pipeline-node:hover{background:rgba(255,255,255,.02)}
+.pipeline-node:hover{background:rgba(255,255,255,.025)}
 .pipeline-node.on{color:var(--green)}
 .pipeline-node.warn{color:var(--amber)}
 .pipeline-arrow{
   display:flex;align-items:center;padding:0 6px;
-  color:#1C2A3A;font-size:16px;flex-shrink:0;
-  border-right:1px solid #1C2A3A;
+  color:var(--bd);font-size:12px;flex-shrink:0;
+  border-right:1px solid var(--bd);
 }
 @media(max-width:700px){
   .pipeline-inner{flex-wrap:wrap}
-  .pipeline-node{flex-basis:33%;border-bottom:1px solid #1C2A3A}
+  .pipeline-node{flex-basis:33%;border-bottom:1px solid var(--bd)}
   .pipeline-arrow{display:none}
 }
 
@@ -240,15 +255,15 @@ h1 .muted{color:var(--text3)}
   color:var(--green);margin-bottom:12px;
   display:flex;align-items:center;gap:8px;
 }
-.eyebrow::before{content:'//';color:var(--text3)}
+.eyebrow::before{content:'//';color:var(--t3)}
 h2{
   font-family:var(--head);
   font-size:clamp(1.6rem,2.8vw,2.2rem);
   font-weight:700;letter-spacing:-.035em;line-height:1.15;
-  color:var(--text1);margin-bottom:12px;
+  color:var(--t1);margin-bottom:12px;
 }
 .section-sub{
-  font-size:14px;color:var(--text2);
+  font-size:14px;color:var(--t2);
   max-width:500px;line-height:1.75;
 }
 
@@ -257,48 +272,50 @@ h2{
 ═══════════════════════════════ */
 .feat-table{
   margin-top:48px;
-  border:1px solid #1C2A3A;
+  border:1px solid var(--bd);
+  border-radius:10px;
+  overflow:hidden;
 }
 .feat-row{
   display:grid;
   grid-template-columns:52px 220px 1fr;
-  border-bottom:1px solid #1C2A3A;
+  border-bottom:1px solid var(--bd);
   transition:background .12s;
 }
 .feat-row:last-child{border-bottom:none}
-.feat-row:hover{background:var(--surface)}
+.feat-row:hover{background:var(--sf)}
 .feat-num{
   padding:24px 0 24px 16px;
   font-family:var(--mono);font-size:11px;font-weight:500;
-  color:var(--green);opacity:.55;
+  color:var(--green);opacity:.6;
   display:flex;align-items:flex-start;
-  border-right:1px solid #1C2A3A;
+  border-right:1px solid var(--bd);
 }
 .feat-name{
   padding:24px 20px;
   font-family:var(--mono);font-size:12px;font-weight:500;
-  color:var(--text1);
-  border-right:1px solid #1C2A3A;
+  color:var(--t1);
+  border-right:1px solid var(--bd);
   display:flex;flex-direction:column;gap:4px;
 }
 .feat-sub{
   font-size:10px;font-weight:400;
-  color:var(--text3);letter-spacing:.04em;
+  color:var(--t3);letter-spacing:.04em;
 }
 .feat-desc{
   padding:24px 28px;
-  font-size:13px;color:var(--text2);line-height:1.7;
+  font-size:13px;color:var(--t2);line-height:1.7;
 }
 .feat-code{
   font-family:var(--mono);font-size:11px;
   color:var(--green);
-  background:rgba(0,212,126,.06);
-  padding:1px 5px;
+  background:rgba(0,212,126,.07);
+  padding:1px 5px;border-radius:4px;
 }
 @media(max-width:760px){
   .feat-row{grid-template-columns:40px 1fr}
   .feat-num{padding:18px 0 18px 12px;font-size:10px}
-  .feat-name{border-right:none;border-bottom:1px solid #1C2A3A;grid-column:2;padding:18px 16px 12px}
+  .feat-name{border-right:none;border-bottom:1px solid var(--bd);grid-column:2;padding:18px 16px 12px}
   .feat-desc{grid-column:1/-1;padding:12px 16px 20px}
 }
 
@@ -306,9 +323,9 @@ h2{
    HOW IT WORKS
 ═══════════════════════════════ */
 .hiw-bg{
-  background:var(--surface);
-  border-top:1px solid #1C2A3A;
-  border-bottom:1px solid #1C2A3A;
+  background:var(--sf);
+  border-top:1px solid var(--bd);
+  border-bottom:1px solid var(--bd);
 }
 .hiw-steps{
   display:grid;
@@ -321,8 +338,9 @@ h2{
 }
 .hiw-step{
   padding:24px;
-  border:1px solid #1C2A3A;
-  background:#060810;
+  border:1px solid var(--bd);
+  border-radius:0;
+  background:#000000;
 }
 .hiw-num{
   font-family:var(--mono);font-size:10px;font-weight:500;
@@ -331,24 +349,25 @@ h2{
 }
 .hiw-title{
   font-family:var(--head);font-size:15px;font-weight:600;
-  color:var(--text1);margin-bottom:8px;letter-spacing:-.02em;
+  color:var(--t1);margin-bottom:8px;letter-spacing:-.02em;
 }
-.hiw-desc{font-size:13px;color:var(--text2);line-height:1.7}
+.hiw-desc{font-size:13px;color:var(--t2);line-height:1.7}
 .hiw-desc code{
   font-family:var(--mono);font-size:11px;
   background:rgba(0,212,126,.07);
-  padding:1px 5px;color:var(--green);
+  padding:1px 5px;color:var(--green);border-radius:4px;
 }
 .hiw-arrow-cell{
   display:flex;align-items:center;justify-content:center;
-  color:#1C2A3A;padding-top:56px;
+  color:var(--bd);padding-top:56px;
 }
 
 .fail-strip{
   margin-top:20px;
   padding:14px 20px;
-  border:1px solid rgba(232,168,56,.14);
-  background:rgba(232,168,56,.03);
+  border:1px solid rgba(240,169,64,.14);
+  background:rgba(240,169,64,.03);
+  border-radius:8px;
   display:flex;align-items:center;flex-wrap:wrap;gap:6px;
   font-family:var(--mono);font-size:12px;
 }
@@ -357,8 +376,8 @@ h2{
   letter-spacing:.08em;text-transform:uppercase;
   color:var(--amber);margin-right:8px;flex-shrink:0;
 }
-.fp-item{color:var(--text3)}
-.fp-sep{color:#1C2A3A}
+.fp-item{color:var(--t3)}
+.fp-sep{color:var(--bd)}
 .fp-final{color:var(--green);font-weight:500}
 
 /* ═══════════════════════════════
@@ -372,28 +391,30 @@ h2{
 .check-list{display:flex;flex-direction:column;gap:12px;margin-top:28px}
 .check-row{
   display:flex;align-items:flex-start;gap:10px;
-  font-size:13px;color:var(--text2);
+  font-size:13px;color:var(--t2);
 }
 .check-mark{
   font-family:var(--mono);font-size:12px;
   color:var(--green);flex-shrink:0;margin-top:2px;
 }
 .code-block{
-  background:#060810;
-  border:1px solid #1C2A3A;
+  background:#000000;
+  border:1px solid var(--bd);
   border-top:2px solid var(--green);
+  border-radius:10px;
   overflow:hidden;
+  box-shadow:0 4px 20px rgba(0,0,0,.35);
 }
 .code-bar{
   padding:9px 14px;
-  background:var(--surface);
-  border-bottom:1px solid #1C2A3A;
+  background:var(--sf);
+  border-bottom:1px solid var(--bd);
   display:flex;align-items:center;gap:6px;
 }
-.code-dot{width:8px;height:8px;border-radius:50%}
+.code-dot{width:9px;height:9px;border-radius:50%}
 .code-filename{
   font-family:var(--mono);font-size:11px;
-  color:var(--text3);margin-left:auto;
+  color:var(--t3);margin-left:auto;
 }
 .code-body{padding:20px 22px}
 pre{
@@ -411,18 +432,22 @@ pre{
 ═══════════════════════════════ */
 .stats-grid{
   display:grid;grid-template-columns:repeat(4,1fr);
-  border:1px solid #1C2A3A;
+  border:1px solid var(--bd);
+  border-radius:10px;
+  overflow:hidden;
   margin-top:48px;
 }
 @media(max-width:640px){.stats-grid{grid-template-columns:repeat(2,1fr)}}
 .stat-cell{
   padding:32px 28px;
-  border-right:1px solid #1C2A3A;
+  border-right:1px solid var(--bd);
+  transition:background .12s;
 }
 .stat-cell:last-child{border-right:none}
+.stat-cell:hover{background:var(--sf)}
 @media(max-width:640px){
   .stat-cell:nth-child(even){border-right:none}
-  .stat-cell:nth-child(n+3){border-top:1px solid #1C2A3A}
+  .stat-cell:nth-child(n+3){border-top:1px solid var(--bd)}
 }
 .stat-num{
   font-family:var(--mono);
@@ -431,39 +456,38 @@ pre{
   color:var(--green);margin-bottom:8px;
 }
 .stat-label{
-  font-family:var(--mono);
-  font-size:11px;color:var(--text3);
-  letter-spacing:.04em;
+  font-family:var(--body);
+  font-size:12px;color:var(--t3);
+  letter-spacing:.01em;
 }
 
 /* ═══════════════════════════════
    FAQ
 ═══════════════════════════════ */
 .faq-list{margin-top:48px;max-width:720px}
-details{border-bottom:1px solid #1C2A3A}
-details:first-child{border-top:1px solid #1C2A3A}
+details{border-bottom:1px solid var(--bd)}
+details:first-child{border-top:1px solid var(--bd)}
 summary{
   padding:20px 0;cursor:pointer;list-style:none;
   display:flex;align-items:center;justify-content:space-between;gap:16px;
   font-family:var(--head);font-size:14px;font-weight:600;
-  color:var(--text1);letter-spacing:-.01em;user-select:none;
+  color:var(--t1);letter-spacing:-.01em;user-select:none;
 }
 summary::-webkit-details-marker{display:none}
 .faq-icon{
   font-family:var(--mono);font-size:18px;
-  color:var(--text3);flex-shrink:0;
-  transition:color .12s;line-height:1;
+  color:var(--t3);flex-shrink:0;
+  transition:color .12s,transform .15s;line-height:1;
 }
 details[open] summary .faq-icon{color:var(--green);transform:rotate(45deg)}
-.faq-icon{transition:color .12s,transform .15s}
 .faq-answer{
   padding:0 0 20px;font-size:14px;
-  color:var(--text2);line-height:1.8;
+  color:var(--t2);line-height:1.8;
 }
 .faq-answer code{
   font-family:var(--mono);font-size:11px;
   background:rgba(0,212,126,.07);
-  padding:1px 6px;color:var(--green);
+  padding:1px 6px;color:var(--green);border-radius:4px;
 }
 
 /* ═══════════════════════════════
@@ -471,12 +495,12 @@ details[open] summary .faq-icon{color:var(--green);transform:rotate(45deg)}
 ═══════════════════════════════ */
 .cta-band{
   padding:96px 28px;text-align:center;
-  background:var(--surface);
-  border-top:1px solid #1C2A3A;
+  background:var(--sf);
+  border-top:1px solid var(--bd);
 }
 .cta-band h2{max-width:520px;margin:0 auto 12px}
 .cta-sub{
-  font-size:14px;color:var(--text2);
+  font-size:14px;color:var(--t2);
   margin-bottom:36px;line-height:1.75;
 }
 .cta-actions{
@@ -488,22 +512,22 @@ details[open] summary .faq-icon{color:var(--green);transform:rotate(45deg)}
 ═══════════════════════════════ */
 footer{
   padding:24px 28px;
-  border-top:1px solid #1C2A3A;
+  border-top:1px solid var(--bd);
   display:flex;align-items:center;justify-content:space-between;
   flex-wrap:wrap;gap:16px;
-  background:#060810;
+  background:var(--sf);
 }
 .footer-logo{
   display:flex;align-items:center;gap:8px;
   font-family:var(--head);font-size:13px;font-weight:600;
-  color:var(--text3);
+  color:var(--t3);
 }
 .footer-links{display:flex;gap:28px;flex-wrap:wrap}
 .footer-link{
-  font-family:var(--mono);font-size:12px;
-  color:var(--text3);transition:color .12s;
+  font-family:var(--body);font-size:13px;
+  color:var(--t3);transition:color .12s;
 }
-.footer-link:hover{color:var(--text2)}
+.footer-link:hover{color:var(--t2)}
 </style>
 </head>
 <body>
@@ -511,25 +535,25 @@ footer{
 <!-- ═══ NAV ═══ -->
 <nav>
   <a class="nav-logo" href="/">
-    <div class="nav-logo-hex">
+    <div class="nav-logo-icon">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-        <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/>
+        <polyline points="2,12 7,12 9,5 11,19 13,12 22,12"/>
       </svg>
     </div>
     Relora
   </a>
 
   <div class="nav-links">
-    <a class="nav-link" href="#features">/features</a>
-    <a class="nav-link" href="#how-it-works">/how-it-works</a>
-    <a class="nav-link" href="#faq">/faq</a>
-    <a class="nav-link" href="/api/docs" target="_blank" rel="noopener">/docs</a>
+    <a class="nav-link" href="#features">Features</a>
+    <a class="nav-link" href="#how-it-works">How it works</a>
+    <a class="nav-link" href="#faq">FAQ</a>
+    <a class="nav-link" href="/api/docs" target="_blank" rel="noopener">Docs</a>
   </div>
 
   <div class="nav-actions">
-    <a class="nav-signin" href="/login.html">sign_in</a>
+    <a class="nav-signin" href="/login.html">Sign in</a>
     <a class="btn-nav" href="/register.html">
-      DEPLOY
+      Get started
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
     </a>
   </div>
@@ -544,9 +568,7 @@ footer{
       <div>
         <div class="hero-status">
           <div class="status-dot"></div>
-          <span class="status-val">Simulated event stream</span>
-          <span class="status-sep">·</span>
-          <span>your real data appears after setup</span>
+          <span class="status-val">Live demo</span>
         </div>
 
         <h1>Webhook delivery<br><span class="muted">you can rely on.</span></h1>
@@ -557,16 +579,21 @@ footer{
 
         <div class="hero-actions">
           <a class="btn-primary" href="/register.html">
-            DEPLOY IN 5 MIN
+            Deploy in 5 min
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
           </a>
-          <a class="btn-outline" href="/api/docs" target="_blank" rel="noopener">view docs</a>
+          <a class="btn-outline" href="/api/docs" target="_blank" rel="noopener">View docs</a>
         </div>
       </div>
 
       <!-- Right: live ingest log -->
       <div class="log-panel">
         <div class="log-header">
+          <div class="log-dots">
+            <div class="log-dot" style="background:#E25555"></div>
+            <div class="log-dot" style="background:#F0A940"></div>
+            <div class="log-dot" style="background:#00D47E"></div>
+          </div>
           <span class="log-title">relora://ingest.log</span>
           <div class="log-live">
             <div class="log-live-dot"></div>
@@ -697,7 +724,7 @@ footer{
       </div>
 
       <div class="hiw-arrow-cell">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1C2A3A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--bd)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
       </div>
 
       <div class="hiw-step">
@@ -707,7 +734,7 @@ footer{
       </div>
 
       <div class="hiw-arrow-cell">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1C2A3A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--bd)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
       </div>
 
       <div class="hiw-step">
@@ -747,8 +774,8 @@ footer{
 
       <div class="code-block">
         <div class="code-bar">
-          <div class="code-dot" style="background:#1C2A3A"></div>
-          <div class="code-dot" style="background:#1C2A3A"></div>
+          <div class="code-dot" style="background:#E25555"></div>
+          <div class="code-dot" style="background:#F0A940"></div>
           <div class="code-dot" style="background:var(--green)"></div>
           <span class="code-filename">ingest.sh</span>
         </div>
@@ -772,7 +799,7 @@ curl -X POST .../api/v1/ingest \
 </section>
 
 <!-- ═══ STATS ═══ -->
-<section class="section-sm" style="border-top:1px solid #1C2A3A;border-bottom:1px solid #1C2A3A;background:var(--surface)">
+<section class="section-sm" style="border-top:1px solid var(--bd);border-bottom:1px solid var(--bd);background:var(--sf)">
   <div class="container">
     <div>
       <div class="eyebrow">built for reliability</div>
@@ -858,10 +885,10 @@ curl -X POST .../api/v1/ingest \
   </p>
   <div class="cta-actions">
     <a class="btn-primary" href="/register.html">
-      CREATE ACCOUNT
+      Create account
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
     </a>
-    <a class="btn-outline" href="/api/docs" target="_blank" rel="noopener">view api docs</a>
+    <a class="btn-outline" href="/api/docs" target="_blank" rel="noopener">View API docs</a>
   </div>
 </section>
 
@@ -869,15 +896,15 @@ curl -X POST .../api/v1/ingest \
 <footer>
   <div class="footer-logo">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-      <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/>
+      <polyline points="2,12 7,12 9,5 11,19 13,12 22,12"/>
     </svg>
     Relora
   </div>
   <div class="footer-links">
-    <a class="footer-link" href="/api/docs" target="_blank">/api/docs</a>
-    <a class="footer-link" href="/api/redoc" target="_blank">/api/redoc</a>
-    <a class="footer-link" href="/login.html">/sign-in</a>
-    <a class="footer-link" href="/register.html">/get-started</a>
+    <a class="footer-link" href="/api/docs" target="_blank">API docs</a>
+    <a class="footer-link" href="/api/redoc" target="_blank">Redoc</a>
+    <a class="footer-link" href="/login.html">Sign in</a>
+    <a class="footer-link" href="/register.html">Get started</a>
   </div>
 </footer>
 

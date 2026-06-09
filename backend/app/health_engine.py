@@ -110,7 +110,9 @@ class HealthEngine:
     @staticmethod
     async def _get_dlq_size(db: AsyncSession, project_id: Optional[str]) -> int:
         """Get current DLQ size (number of failed webhooks)."""
-        query = select(func.count(Webhook.id)).where(Webhook.status == "failed")
+        query = select(func.count(Webhook.id)).where(
+            Webhook.status == "failed", Webhook.is_simulation == False  # noqa: E712
+        )
         if project_id:
             query = query.where(Webhook.project_id == project_id)
         
@@ -134,6 +136,7 @@ class HealthEngine:
             query = select(func.count(Webhook.id)).where(
                 and_(
                     Webhook.status == "failed",
+                    Webhook.is_simulation == False,  # noqa: E712
                     Webhook.created_at >= window_start,
                 )
             )
@@ -148,7 +151,9 @@ class HealthEngine:
     @staticmethod
     async def _get_oldest_dlq_event(db: AsyncSession, project_id: Optional[str]) -> Optional[datetime]:
         """Get the timestamp of the oldest DLQ event."""
-        query = select(Webhook.created_at).where(Webhook.status == "failed").order_by(Webhook.created_at.asc())
+        query = select(Webhook.created_at).where(
+            Webhook.status == "failed", Webhook.is_simulation == False  # noqa: E712
+        ).order_by(Webhook.created_at.asc())
         if project_id:
             query = query.where(Webhook.project_id == project_id)
         
@@ -173,9 +178,10 @@ class HealthEngine:
     @staticmethod
     async def _get_success_rate(db: AsyncSession, project_id: Optional[str]) -> float:
         """Get the overall success rate (completed / total)."""
-        total_query = select(func.count(Webhook.id))
-        completed_query = select(func.count(Webhook.id)).where(Webhook.status == "completed")
-        
+        ns = Webhook.is_simulation == False  # noqa: E712
+        total_query = select(func.count(Webhook.id)).where(ns)
+        completed_query = select(func.count(Webhook.id)).where(Webhook.status == "completed", ns)
+
         if project_id:
             total_query = total_query.where(Webhook.project_id == project_id)
             completed_query = completed_query.where(Webhook.project_id == project_id)

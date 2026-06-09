@@ -98,3 +98,52 @@ async def test_success_in_half_open_closes_circuit(mock_db, mock_destination):
     mock_destination.circuit_failure_count = 0
     await record_outcome(mock_db, mock_destination.id, success=True)
     assert mock_destination.circuit_state == "closed"
+
+
+@pytest.mark.asyncio
+async def test_half_open_single_success_insufficient(mock_db, mock_destination):
+    """One success when failure_count == SUCCESS_TO_CLOSE must NOT close the circuit."""
+    from app.circuit_breaker import record_outcome, SUCCESS_TO_CLOSE
+    mock_destination.circuit_state = "half_open"
+    # Simulate what should_deliver sets after open → half_open transition
+    mock_destination.circuit_failure_count = SUCCESS_TO_CLOSE
+    await record_outcome(mock_db, mock_destination.id, success=True)
+    assert mock_destination.circuit_state == "half_open"
+    assert mock_destination.circuit_failure_count == SUCCESS_TO_CLOSE - 1
+
+
+@pytest.mark.asyncio
+async def test_half_open_closes_after_exactly_success_to_close_successes(mock_db, mock_destination):
+    """Exactly SUCCESS_TO_CLOSE consecutive successes must close the circuit."""
+    from app.circuit_breaker import record_outcome, SUCCESS_TO_CLOSE
+    mock_destination.circuit_state = "half_open"
+    mock_destination.circuit_failure_count = SUCCESS_TO_CLOSE
+    for i in range(SUCCESS_TO_CLOSE - 1):
+        await record_outcome(mock_db, mock_destination.id, success=True)
+        assert mock_destination.circuit_state == "half_open", f"should still be half_open after {i+1} success(es)"
+    # Final success should close
+    await record_outcome(mock_db, mock_destination.id, success=True)
+    assert mock_destination.circuit_state == "closed"
+    assert mock_destination.circuit_failure_count == 0
+
+
+@pytest.mark.asyncio
+async def test_failure_in_half_open_opens_circuit(mock_db, mock_destination):
+    """A failure while half_open should push the failure count back up and re-open if threshold met."""
+    from app.circuit_breaker import record_outcome, FAILURE_THRESHOLD
+    mock_destination.circuit_state = "half_open"
+    mock_destination.circuit_failure_count = FAILURE_THRESHOLD - 1
+    await record_outcome(mock_db, mock_destination.id, success=False)
+    assert mock_destination.circuit_state == "open"
+
+
+@pytest.mark.asyncio
+async def test_circuit_remains_closed_on_sustained_success(mock_db, mock_destination):
+    """Many successes in closed state keep failure count at 0."""
+    from app.circuit_breaker import record_outcome
+    mock_destination.circuit_state = "closed"
+    mock_destination.circuit_failure_count = 5
+    for _ in range(3):
+        await record_outcome(mock_db, mock_destination.id, success=True)
+    assert mock_destination.circuit_state == "closed"
+    assert mock_destination.circuit_failure_count == 0

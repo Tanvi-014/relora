@@ -54,7 +54,7 @@ async def dispatch_dlq_alert(
     dlq_depth_result = await session.execute(
         select(func.count()).select_from(Webhook).where(
             Webhook.tenant_id == tenant_id,
-            Webhook.status == "dead",
+            Webhook.status == "failed",
         )
     )
     current_dlq_depth = dlq_depth_result.scalar_one()

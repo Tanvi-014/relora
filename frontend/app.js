@@ -13,10 +13,13 @@ let currentProject = null;
 let projects = [];
 let selectedWebhookId = null;
 let currentPage = 1;
+let _showTestEvents = false;
 let destinations = [];
 let ws = null;
 let wsReconnectTimer = null;
+let _wsEverConnected = false;
 let searchTimer = null;
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 const feedEvents = [];
 const FEED_MAX = 50;
 let _pendingQueue = 0;
@@ -81,6 +84,10 @@ async function _pollDLQState() {
     _updateDLQIndicators(depth);
     // Refresh notifications if DLQ state changed
     if (depth !== prevDepth) loadNotifications();
+    // DLQ just cleared — auto-resolve any orphaned open incidents
+    if (depth === 0 && prevDepth > 0) {
+      apiFetch('/dlq/resolve-all-incidents', { method: 'POST' }).catch(() => {});
+    }
   } catch {}
 }
 
@@ -96,6 +103,10 @@ function _updateDLQIndicators(depth) {
     badge.style.display = depth > 0 ? '' : 'none';
   }
   if (navItem) navItem.classList.toggle('nav-item--dlq-alert', depth > 0);
+
+  // "Clear all" button — only shown when there are failed events
+  const clearBtn = document.getElementById('dlq-clear-btn');
+  if (clearBtn) clearBtn.style.display = depth > 0 ? '' : 'none';
 
   // Page-pulse DLQ counter color
   const ppDlq = document.getElementById('pp-dlq');
@@ -155,9 +166,8 @@ async function loadProjects() {
   try {
     projects = await apiFetch('/projects');
     if (projects.length === 0) {
-      // Auto-create first project
-      const p = await apiFetch('/projects', { method: 'POST', body: JSON.stringify({ name: 'My Project' }) });
-      projects = [p];
+      openModal('modal-new-project');
+      return;
     }
     currentProject = projects[0];
     renderProjectSwitcher();
@@ -175,11 +185,17 @@ function renderProjectSwitcher() {
       <span>📁</span> ${esc(p.name)}
     </div>
   `).join('');
-  document.getElementById('ps-trigger').addEventListener('click', (e) => {
-    e.stopPropagation();
-    document.getElementById('ps-dropdown').classList.toggle('open');
-    document.getElementById('user-dropdown').classList.remove('open');
-  });
+  // Note: click handler is set once via onclick="togglePSDropdown(event)" in HTML — no addEventListener here.
+}
+
+function togglePSDropdown(e) {
+  e.stopPropagation();
+  // If the click originated inside the project list (i.e. a project item), let switchProject handle it.
+  if (document.getElementById('ps-list').contains(e.target)) return;
+  document.getElementById('ps-dropdown').classList.toggle('open');
+  document.getElementById('user-dropdown').classList.remove('open');
+  document.getElementById('notif-panel')?.classList.remove('open');
+  document.getElementById('notif-btn')?.classList.remove('has-unread-open');
 }
 
 async function switchProject(id) {
@@ -236,6 +252,8 @@ function connectWS() {
 
   ws.onopen = () => {
     setWsDot('connected');
+    if (_wsEverConnected) toast('Live updates reconnected', 'success');
+    _wsEverConnected = true;
     if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
   };
 
@@ -245,6 +263,12 @@ function connectWS() {
       if (msg.type === 'webhook.updated') {
         const d = msg.data;
         updateWebhookRowLive(d);
+
+        // If the detail panel is showing this webhook and the webhooks page is active,
+        // refresh the panel — debounced so rapid retries don't create a request storm.
+        const activePage = document.querySelector('.page.active')?.id;
+        if (selectedWebhookId === d.id && activePage === 'page-webhooks') _debouncedOpenPanel(d.id);
+
         // Push to activity feed + pulse arch viz
         const destLabel = _shortUrl(d.destination_url);
         if (d.status === 'completed') {
@@ -257,9 +281,19 @@ function connectWS() {
           _arcVizPulse('err');
           _pipelineNodeFlash('pipe-node-dlq', 'err');
         }
-        // Refresh dashboard KPIs if overview is active
-        if (document.getElementById('page-overview')?.classList.contains('active')) {
-          loadDashboard();
+
+        // Always refresh the DLQ badge count so indicators stay accurate
+        _pollDLQState();
+
+        // Refresh whichever page is currently active
+        const wsPageRefresh = {
+          'page-overview': loadDashboard,
+          'page-webhooks': loadStats,
+        };
+        if (activePage === 'page-dlq-intelligence' && d.status === 'completed') {
+          _debouncedDLQReload();
+        } else if (wsPageRefresh[activePage]) {
+          wsPageRefresh[activePage]();
         }
       }
     } catch {}
@@ -267,6 +301,7 @@ function connectWS() {
 
   ws.onclose = () => {
     setWsDot('disconnected');
+    if (_wsEverConnected) toast('Live updates disconnected — reconnecting…', 'info');
     wsReconnectTimer = setTimeout(connectWS, 3000);
   };
 
@@ -277,6 +312,9 @@ function reconnectWS() {
   if (ws) ws.close();
   setTimeout(connectWS, 100);
 }
+
+const _debouncedDLQReload = debounce(loadDLQIntelligence, 800);
+const _debouncedOpenPanel = debounce(openPanel, 600);
 
 function setWsDot(state) {
   const dot = document.getElementById('ws-dot');
@@ -454,9 +492,9 @@ async function loadNotifications() {
     items.push({
       id: 'onboarding-alerts',
       type: 'onboarding',
-      title: 'Configure alert thresholds',
-      desc: 'Set failure-rate or latency thresholds to get notified before incidents escalate.',
-      action: () => navTo('settings'),
+      title: 'Get notified when deliveries fail',
+      desc: 'Connect Slack or email so you hear about failures before your customers do.',
+      action: () => { navTo('alerts'); requestAnimationFrame(openAlertModal); },
     });
   }
 
@@ -513,9 +551,15 @@ function _renderNotifBadge() {
   const badge    = document.getElementById('notif-badge');
   const btn      = document.getElementById('notif-btn');
   if (!badge || !btn) return;
+  const wasUnread = btn.classList.contains('has-unread');
   if (unread.length > 0) {
     badge.textContent = unread.length > 9 ? '9+' : unread.length;
     badge.style.display = '';
+    if (!wasUnread) {
+      // Re-trigger ring animation by toggling has-unread
+      btn.classList.remove('has-unread');
+      void btn.offsetWidth;
+    }
     btn.classList.add('has-unread');
   } else {
     badge.style.display = 'none';
@@ -536,7 +580,7 @@ function _renderNotifList() {
     incident: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`,
     dlq: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v3l2 2"/></svg>`,
     onboarding: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>`,
-    product: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/></svg>`,
+    product: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,12 7,12 9,5 11,19 13,12 22,12"/></svg>`,
   };
   el.innerHTML = _notifItems.map(item => {
     const unread = !readIds.has(item.id);
@@ -635,10 +679,26 @@ async function loadDashboard() {
     _renderCommandCenter(d.kpis, d.active_incidents || []);
     _renderWhatChanged(d.kpis, d.active_incidents || []);
     _renderArchViz(d.kpis);
-    _renderOnboarding();
-    _renderNRA();
     _updatePagePulse();
-  } catch {}
+    document.getElementById('mission-control')?.querySelector('.dashboard-error')?.remove();
+    _renderOnboardingSection();
+    _renderSuggestionBar();
+  } catch (e) {
+    const mc = document.getElementById('mission-control');
+    if (mc) {
+      const existing = mc.querySelector('.dashboard-error');
+      const msg = 'Dashboard data unavailable — ' + (e.message || 'check your connection');
+      if (existing) {
+        existing.textContent = msg;
+      } else {
+        const err = document.createElement('div');
+        err.className = 'dashboard-error';
+        err.style.cssText = 'padding:16px;color:var(--danger);font-size:13px;';
+        err.textContent = msg;
+        mc.prepend(err);
+      }
+    }
+  }
 }
 
 function _updatePagePulse() {
@@ -716,75 +776,154 @@ function _sysPill(cls, label) {
   return `<span class="sys-status-pill ${cls}">${esc(label)}</span>`;
 }
 
-function _renderOnboarding() {
-  const card = document.getElementById('onboarding-card');
-  if (!card) return;
-  const hasDest = destinations.length > 0;
-  const hasActivity = (_mcKpis?.deliveries_today ?? 0) > 0 || feedEvents.length > 0;
-  _updateSetupStrip(hasDest, hasActivity);
-  if (hasDest && hasActivity) { card.style.display = 'none'; return; }
-  card.style.display = '';
+// ---------------------------------------------------------------------------
+// First-time suggestion bar — persistent cross-page onboarding guide
+// ---------------------------------------------------------------------------
+async function _renderSuggestionBar() {
+  const bar = document.getElementById('suggestion-bar');
+  if (!bar) return;
+  await _loadAlertCount();
 
-  const mark = (stepEl, numEl, done) => {
-    if (!stepEl || !numEl) return;
-    stepEl.classList.toggle('mc-ob-step--done', done);
-    numEl.textContent = done ? '✓' : numEl.dataset.n;
-  };
-  const s1 = document.getElementById('ob-step-1'), n1 = document.getElementById('ob-num-1');
-  const s2 = document.getElementById('ob-step-2'), n2 = document.getElementById('ob-num-2');
-  const s3 = document.getElementById('ob-step-3'), n3 = document.getElementById('ob-num-3');
-  if (n1) n1.dataset.n = '1';
-  if (n2) n2.dataset.n = '2';
-  if (n3) n3.dataset.n = '3';
-  mark(s1, n1, hasDest);
-  mark(s2, n2, hasDest);
-  mark(s3, n3, hasActivity);
+  const hasDest     = destinations.length > 0;
+  const hasActivity = (_mcKpis?.deliveries_today ?? 0) > 0;
+  const hasAlerts   = (_alertCount ?? 0) > 0;
 
-  // Populate curl example with real API key
-  const curlEl = document.getElementById('ob-curl-example');
-  if (curlEl && currentProject?.api_key) {
-    const ingestUrl = `${window.location.origin}/api/v1/ingest`;
-    curlEl.textContent = `curl -X POST ${ingestUrl} \\
-  -H "Content-Type: application/json" \\
-  -H "X-Relora-API-Key: ${currentProject.api_key}" \\
-  -d '{
-    "event_type": "payment.succeeded",
-    "data": { "order_id": "ord_123", "amount": 4999 }
-  }'`;
+  if (hasDest && hasActivity && hasAlerts) { bar.style.display = 'none'; return; }
+
+  let stepLabel, text, ctaLabel, ctaFn, dismissKey;
+  if (!hasDest) {
+    stepLabel = 'Step 1 of 3'; dismissKey = 'relora_sug_s1';
+    text = 'Add your first destination — tell Relora where to forward incoming webhooks.';
+    ctaLabel = 'Go to Destinations';
+    ctaFn = "navTo('destinations')";
+  } else if (!hasActivity) {
+    stepLabel = 'Step 2 of 3'; dismissKey = 'relora_sug_s2';
+    text = 'Send your first event — point a webhook source at your ingest URL and watch it flow through.';
+    ctaLabel = 'View setup';
+    ctaFn = "navTo('overview')";
+  } else {
+    stepLabel = 'Step 3 of 3'; dismissKey = 'relora_sug_s3';
+    text = 'Set up failure alerts — get notified the moment a delivery fails, before your customers do.';
+    ctaLabel = 'Set up Alerts';
+    ctaFn = "navTo('alerts');setTimeout(openAlertModal,100)";
   }
+
+  if (localStorage.getItem(dismissKey) === '1') { bar.style.display = 'none'; return; }
+
+  bar.style.display = 'flex';
+  bar.innerHTML = `
+    <span class="sb-badge">${esc(stepLabel)}</span>
+    <span class="sb-text">${esc(text)}</span>
+    <div class="sb-actions">
+      <button class="btn btn-primary btn-sm sb-cta" onclick="${ctaFn}">${esc(ctaLabel)} →</button>
+      <button class="sb-dismiss" onclick="_dismissSuggBar('${dismissKey}')" title="Dismiss">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>`;
 }
 
-function _updateSetupStrip(hasDest, hasActivity) {
-  const strip = document.getElementById('setup-strip');
-  if (!strip) return;
-  if ((hasDest && hasActivity) || localStorage.getItem('relora_setup_dismissed') === '1') {
-    strip.style.display = 'none';
+function _dismissSuggBar(key) {
+  localStorage.setItem(key, '1');
+  const bar = document.getElementById('suggestion-bar');
+  if (bar) bar.style.display = 'none';
+}
+
+async function _renderOnboardingSection() {
+  await _loadAlertCount();
+  const section = document.getElementById('onboarding-section');
+  if (!section) return;
+  if (section.classList.contains('obs-celebrate')) return;
+  if (section.classList.contains('demo-journey')) return;
+
+  const hasDest     = destinations.length > 0;
+  // Only count real deliveries from the dashboard API — feedEvents includes
+  // test/simulated events which would falsely advance the onboarding step.
+  const hasActivity = (_mcKpis?.deliveries_today ?? 0) > 0;
+  const hasAlerts   = (_alertCount ?? 0) > 0;
+  const dismissed   = localStorage.getItem('relora_onboarding_dismissed') === '1';
+
+  if ((hasDest && hasActivity && hasAlerts) || dismissed) {
+    section.style.display = 'none';
     return;
   }
-  strip.style.display = '';
-  const inner = document.getElementById('setup-strip-inner');
-  if (!inner) return;
-  const s = (done, num, label, page) => `
-    <span class="setup-strip-step${done ? ' setup-strip-step--done' : ''}">
-      <span class="setup-strip-num">${done ? '✓' : num}</span>
-      <span class="setup-strip-label">${label}</span>
-      ${!done ? `<button class="setup-strip-cta" onclick="navTo('${page}')">Do it →</button>` : ''}
-    </span>`;
-  inner.innerHTML =
-    `<span style="font-size:10px;font-family:var(--mono);color:var(--accent);letter-spacing:.06em;text-transform:uppercase;flex-shrink:0">Setup</span>` +
-    `<span class="setup-strip-sep">·</span>` +
-    s(hasDest,    '1', 'Add a destination',      'destinations') +
-    `<span class="setup-strip-sep">·</span>` +
-    s(hasDest,    '2', 'Configure your source',  'settings') +
-    `<span class="setup-strip-sep">·</span>` +
-    s(hasActivity,'3', 'Send your first webhook', 'overview');
+
+  // Deduplicate re-renders: skip if the meaningful state hasn't changed.
+  // This prevents WS-triggered loadDashboard calls from flickering the card.
+  const stateKey = `${+hasDest}|${+hasActivity}|${+hasAlerts}`;
+  if (section.dataset.obsState === stateKey) return;
+  section.dataset.obsState = stateKey;
+
+  section.style.display = '';
+
+  const steps = [
+    { label: 'Add destination', done: hasDest },
+    { label: 'Send events',     done: hasActivity },
+    { label: 'Set up alerts',   done: hasAlerts },
+  ];
+  const doneCount  = steps.filter(s => s.done).length;
+  const activeIdx  = steps.findIndex(s => !s.done);
+
+  const stepsHtml = steps.map((s, i) => {
+    const state = s.done ? 'done' : i === activeIdx ? 'active' : 'pending';
+    const icon  = s.done
+      ? `<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><polyline points="20 6 9 17 4 12"/></svg>`
+      : `<span class="obs-step-num">${i + 1}</span>`;
+    return (i > 0 ? '<span class="obs-step-arr">→</span>' : '') +
+      `<span class="obs-step obs-step--${state}">${icon} ${esc(s.label)}</span>`;
+  }).join('');
+
+  let title, desc, actionsHtml;
+
+  if (!hasDest) {
+    title = 'Choose where events go';
+    desc  = 'Add your app\'s endpoint — Relora will forward every incoming webhook to it, with automatic retries and delivery tracking.';
+    actionsHtml = `<button class="btn btn-primary btn-sm" onclick="openDestModal()">Add destination</button>`;
+  } else if (!hasActivity) {
+    const ingestUrl = `${window.location.origin}/api/v1/ingest`;
+    const apiKey    = currentProject?.api_key || 'YOUR_API_KEY';
+    const cmd       = `curl -X POST ${ingestUrl} \\\n  -H "X-Relora-API-Key: ${apiKey}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"event_type":"test.event","data":{"hello":"world"}}'`;
+    title = 'Send events into Relora';
+    desc  = 'Point Stripe, GitHub, Shopify, or your app at your ingest URL. Every event that arrives gets routed to your destination automatically.';
+    actionsHtml = `
+      <div class="obs-url-row">
+        <input class="input obs-url-input" id="obs-ingest-url" readonly value="${esc(ingestUrl)}" onclick="this.select()">
+        <button class="btn btn-secondary btn-sm" onclick="navigator.clipboard.writeText(document.getElementById('obs-ingest-url').value).then(()=>toast('Endpoint URL copied','success'))">Copy URL</button>
+      </div>
+      <div class="obs-curl-row">
+        <pre class="obs-curl">${esc(cmd)}</pre>
+        <button class="btn btn-ghost btn-xs obs-curl-copy" onclick="_nraCopyCmd(${JSON.stringify(cmd)})">Copy</button>
+      </div>
+      <div class="obs-alt">Need help? <a class="obs-link" href="/docs.html" target="_blank">Read the quick-start guide →</a></div>`;
+  } else {
+    title = 'Know when something breaks';
+    desc  = 'Get notified the moment deliveries fail — before your customers notice. Connect Slack or email in under a minute.';
+    actionsHtml = `
+      <button class="btn btn-primary btn-sm" onclick="navTo('alerts');setTimeout(openAlertModal,100)">Set up an alert</button>
+      <button class="btn btn-ghost btn-sm" onclick="_dismissOnboarding()">Not now</button>`;
+  }
+
+  section.innerHTML = `
+    <div class="obs-header">
+      <span class="obs-eyebrow">Setup progress</span>
+      <div class="obs-steps-row">${stepsHtml}</div>
+      <span class="obs-count">${doneCount} / ${steps.length} complete</span>
+    </div>
+    <div class="obs-body">
+      <div class="obs-title">${esc(title)}</div>
+      <div class="obs-desc">${esc(desc)}</div>
+      <div class="obs-actions">${actionsHtml}</div>
+    </div>`;
 }
 
-function _dismissSetupStrip() {
-  localStorage.setItem('relora_setup_dismissed', '1');
-  const strip = document.getElementById('setup-strip');
-  if (strip) strip.style.display = 'none';
+function _dismissOnboarding() {
+  localStorage.setItem('relora_onboarding_dismissed', '1');
+  const section = document.getElementById('onboarding-section');
+  if (section) {
+    section.style.display = 'none';
+    delete section.dataset.obsState;
+  }
 }
+
 
 // ---------------------------------------------------------------------------
 // Next Recommended Action card
@@ -799,103 +938,37 @@ async function _loadAlertCount() {
   } catch { _alertCount = 0; }
 }
 
-async function _renderNRA() {
-  await _loadAlertCount();
-  const card = document.getElementById('nra-card');
-  if (!card) return;
-  // Don't overwrite the celebration card once it's shown
-  if (card.classList.contains('nra-card--celebrate')) return;
-
-  const hasDest     = destinations.length > 0;
-  const hasActivity = (_mcKpis?.deliveries_today ?? 0) > 0 || feedEvents.length > 0;
-  const hasAlerts   = (_alertCount ?? 0) > 0;
-  const insightsSeen = localStorage.getItem('relora_insights_seen') === '1';
-  const body = document.getElementById('nra-body');
-  if (!body) return;
-
-  if (!hasDest) {
-    card.style.display = '';
-    body.innerHTML = `
-      <div class="nra-title">Add your first destination</div>
-      <div class="nra-desc">Tell Relora where to deliver incoming webhooks — your app's API, a staging URL, or a test endpoint.</div>
-      <div class="nra-actions">
-        <button class="btn btn-primary btn-sm" onclick="openDestModal()">Add destination</button>
-      </div>`;
-    return;
-  }
-
-  if (!hasActivity) {
-    card.style.display = '';
-    const ingestUrl = `${window.location.origin}/api/v1/ingest`;
-    const apiKey = currentProject?.api_key || 'YOUR_API_KEY';
-    const cmd = `curl -X POST ${ingestUrl} \\\n  -H "Content-Type: application/json" \\\n  -H "X-Relora-API-Key: ${apiKey}" \\\n  -d '{"event_type":"payment.created","data":{"order_id":"ord_test_1"}}'`;
-    body.innerHTML = `
-      <div class="nra-title">Send your first webhook to verify delivery.</div>
-      <div class="nra-desc">Your destination is ready. Run the test command to confirm the full pipeline is working — the event will appear live below.</div>
-      <div class="nra-actions">
-        <button class="btn btn-primary btn-sm" onclick="_nraCopyCmd(${JSON.stringify(cmd)})">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-          Copy test command
-        </button>
-        <button class="btn btn-secondary btn-sm" onclick="navTo('simulator')">Use simulator →</button>
-      </div>`;
-    return;
-  }
-
-  if (!hasAlerts) {
-    card.style.display = '';
-    body.innerHTML = `
-      <div class="nra-title">Configure alerts to get notified when deliveries fail.</div>
-      <div class="nra-desc">Know the moment something breaks — before your customers do. Connect Slack, email, or any webhook endpoint.</div>
-      <div class="nra-actions">
-        <button class="btn btn-primary btn-sm" onclick="navTo('alerts');setTimeout(openAlertModal,100)">Configure alerts</button>
-      </div>`;
-    return;
-  }
-
-  if (!insightsSeen) {
-    card.style.display = '';
-    body.innerHTML = `
-      <div class="nra-title">Explore Insights and reliability reporting.</div>
-      <div class="nra-desc">Weekly reliability grades, delivery trends, and shareable reports — see how your system is really performing over time.</div>
-      <div class="nra-actions">
-        <button class="btn btn-primary btn-sm" onclick="localStorage.setItem('relora_insights_seen','1');navTo('insights')">Open Insights</button>
-        <button class="btn btn-secondary btn-sm" onclick="_dismissNRA()">Not now</button>
-      </div>`;
-    return;
-  }
-
-  card.style.display = 'none';
-}
-
 function _nraCopyCmd(cmd) {
   navigator.clipboard.writeText(cmd).then(() => toast('Copied to clipboard', 'success'));
 }
 
-function _dismissNRA() {
-  const card = document.getElementById('nra-card');
-  if (card) card.style.display = 'none';
-}
-
 function _triggerFirstDeliveryCelebration(event) {
   if (localStorage.getItem('relora_first_celebrated') === '1') return;
+  const section = document.getElementById('onboarding-section');
+  if (!section) return;
+  if (section.classList.contains('demo-journey')) return;
   localStorage.setItem('relora_first_celebrated', '1');
-  const card = document.getElementById('nra-card');
-  if (!card) return;
-  card.className = 'nra-card nra-card--celebrate';
-  card.style.display = '';
-  const dest = destinations.find(d => d.id === event.destination_id);
-  const destName = dest?.name || _shortUrl(event.destination_url || '');
+  // Stamp obsState so the next _renderOnboardingSection call (from WS-triggered
+  // loadDashboard) doesn't overwrite this celebration card.
+  section.dataset.obsState = 'celebrate';
+  section.className = 'obs-card obs-celebrate';
+  section.style.display = '';
+  // Demo event is no longer needed now that a real webhook delivered.
+  _updateDemoBtn();
+  const dest      = destinations.find(d => d.id === event.destination_id);
+  const destName  = dest?.name || _shortUrl(event.destination_url || '');
   const eventLabel = event.event_id || 'webhook';
-  document.getElementById('nra-body').innerHTML = `
-    <div class="nra-celebrate-emoji">🎉</div>
-    <div class="nra-title">First webhook delivered</div>
-    <div class="nra-celebrate-event">${esc(eventLabel)}</div>
-    <div class="nra-celebrate-dest">→ ${esc(destName)}</div>
-    <div class="nra-celebrate-latency">Delivered successfully</div>
-    <div class="nra-actions" style="margin-top:14px">
-      <button class="btn btn-primary btn-sm" onclick="navTo('alerts');setTimeout(openAlertModal,100)">Set up alerts →</button>
-      <button class="btn btn-secondary btn-sm" onclick="_dismissNRA()">Dismiss</button>
+  section.innerHTML = `
+    <div class="obs-celebrate-inner">
+      <div class="obs-celebrate-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <div class="obs-celebrate-title">First webhook delivered</div>
+      <div class="obs-celebrate-meta">${esc(eventLabel)} → ${esc(destName)}</div>
+      <div class="obs-celebrate-actions">
+        <button class="btn btn-primary btn-sm" onclick="navTo('alerts');setTimeout(openAlertModal,100)">Set up alerts →</button>
+        <button class="btn btn-ghost btn-sm" onclick="_dismissOnboarding()">Dismiss</button>
+      </div>
     </div>`;
 }
 
@@ -1294,13 +1367,10 @@ async function _renderCommandCenter(kpis, incidents) {
   let score = _computeDerivedScore(kpis, incidents);
   let statusText = score >= 90 ? 'Healthy' : score >= 70 ? 'Degraded' : 'Critical';
   try {
-    const h = await fetch('/api/v1/dlq/health', { credentials: 'include' });
-    if (h.ok) {
-      const hd = await h.json();
-      if (typeof hd.overall_score === 'number') score = hd.overall_score;
-      if (hd.health_status) {
-        statusText = hd.health_status.charAt(0) + hd.health_status.slice(1).toLowerCase();
-      }
+    const hd = await apiFetch('/dlq/health');
+    if (typeof hd.overall_score === 'number') score = hd.overall_score;
+    if (hd.health_status) {
+      statusText = hd.health_status.charAt(0) + hd.health_status.slice(1).toLowerCase();
     }
   } catch {}
 
@@ -1366,9 +1436,49 @@ function _renderFeed(newEventAtTop) {
   if (!body) return;
   if (!feedEvents.length) {
     const hasDest = destinations.length > 0;
-    body.innerHTML = hasDest
-      ? '<div class="mc-stream-empty">No events in the last 24 hours — POST to <code>/api/v1/ingest</code> to see live activity here</div>'
-      : '<div class="mc-stream-empty">Add a destination and send your first webhook — deliveries appear here in real time</div>';
+    if (!hasDest) {
+      // Step 1 guidance — no destination yet
+      body.innerHTML = `
+        <div style="display:flex;flex-direction:column;align-items:center;text-align:center;padding:32px 24px;gap:14px">
+          <div style="width:44px;height:44px;border-radius:50%;background:rgba(0,212,126,.08);border:1px solid rgba(0,212,126,.2);display:flex;align-items:center;justify-content:center;color:#00D47E;flex-shrink:0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/><line x1="12" y1="3" x2="12" y2="9"/><line x1="12" y1="15" x2="12" y2="21"/><line x1="3" y1="12" x2="9" y2="12"/><line x1="15" y1="12" x2="21" y2="12"/></svg>
+          </div>
+          <div>
+            <div style="font-size:13.5px;font-weight:600;color:var(--text);margin-bottom:5px">Add a destination first</div>
+            <div style="font-size:12px;color:var(--text3);line-height:1.6;max-width:220px">Tell Relora where to forward events — your app's URL, a webhook endpoint, anywhere.</div>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="openDestModal()" style="gap:6px">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+            Add destination
+          </button>
+          <a class="btn btn-ghost btn-sm" href="/index.html" target="_blank" style="font-size:11px;color:var(--text3)">Watch the demo →</a>
+        </div>`;
+    } else {
+      // Step 2 guidance — destination exists, waiting for first event
+      const ingestUrl = window.location.origin + '/api/v1/ingest';
+      const apiKey = currentProject?.api_key || 'YOUR_API_KEY';
+      body.innerHTML = `
+        <div style="padding:20px 16px;display:flex;flex-direction:column;gap:14px">
+          <div>
+            <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px">Your ingest URL</div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <input readonly style="flex:1;font-family:var(--mono);font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text2);outline:none;min-width:0" value="${esc(ingestUrl)}" onclick="this.select()">
+              <button class="btn btn-secondary btn-sm" style="flex-shrink:0;font-size:11px" onclick="navigator.clipboard.writeText('${esc(ingestUrl)}').then(()=>toast('URL copied','success'))">Copy</button>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px">Quick test</div>
+            <div style="position:relative">
+              <pre id="feed-empty-curl" style="font-family:var(--mono);font-size:10.5px;line-height:1.7;color:var(--text3);background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 40px 10px 12px;margin:0;white-space:pre-wrap;word-break:break-all">curl -X POST ${esc(ingestUrl)} \\
+  -H "X-Relora-API-Key: ${esc(apiKey)}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"event_type":"test.ping","data":{}}'</pre>
+              <button class="btn btn-ghost" style="position:absolute;top:6px;right:6px;font-size:10px;padding:3px 7px;border:1px solid var(--border);border-radius:5px;color:var(--text3)" onclick="_nraCopyCmd(document.getElementById('feed-empty-curl').textContent)">Copy</button>
+            </div>
+          </div>
+          <div style="font-size:11.5px;color:var(--text3)">Events appear here live once they start flowing.</div>
+        </div>`;
+    }
     return;
   }
 
@@ -1548,7 +1658,9 @@ function _renderKPIStrip(kpis, incidents, recentFailures) {
     }
   };
 
-  if (rate !== null) {
+  const noActivity = delivered === 0 && failures === 0;
+
+  if (rate !== null && !noActivity) {
     const cls = rate >= 99 ? 'good' : rate >= 95 ? 'warn' : 'bad';
     setKpi('mc-kpi-rate', rate.toFixed(1) + '%', cls, 'mc-kpi-cell-rate', rate < 95);
   }
@@ -1560,7 +1672,7 @@ function _renderKPIStrip(kpis, incidents, recentFailures) {
 
   setKpi('mc-kpi-failures',
     failures > 0 ? failures : '0',
-    failures > 0 ? 'bad' : 'good',
+    failures > 0 ? 'bad' : noActivity ? '' : 'good',
     'mc-kpi-cell-failures', failures > 0);
 
   setKpi('mc-kpi-dlq-strip',
@@ -1781,7 +1893,14 @@ function _renderMCDestinations() {
   }
   if (cellEl) cellEl.classList.toggle('mc-kpi-cell--alert', totalDests > 0 && healthyDests < totalDests);
   if (!destinations.length) {
-    el.innerHTML = '<div class="mc-stream-empty" style="padding:16px 12px">No destinations configured</div>';
+    el.innerHTML = `
+      <div style="padding:14px 14px 12px;display:flex;flex-direction:column;gap:10px">
+        <div style="font-size:12px;color:var(--text3);line-height:1.55">Where should Relora send your events? Add an endpoint and deliveries start immediately.</div>
+        <button class="btn btn-primary btn-sm" style="width:100%;justify-content:center;gap:6px" onclick="openDestModal()">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+          Add destination
+        </button>
+      </div>`;
     return;
   }
 
@@ -1821,12 +1940,35 @@ async function loadWebhooks(page = 1) {
   let qs = `?page=${page}&limit=25`;
   if (status) qs += `&status=${status}`;
   if (search) qs += `&search=${encodeURIComponent(search)}`;
+  if (!_showTestEvents) qs += `&exclude_simulations=true`;
   if (destId) qs += `&destination_id=${destId}`;
 
   try {
     const data = await apiFetch('/webhooks' + qs);
     renderWebhooksTable(data, document.getElementById('webhooks-table-body'));
     renderPagination('wh-pagination', data.page, data.total_pages, loadWebhooks);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function toggleTestEvents() {
+  _showTestEvents = !_showTestEvents;
+  const btn = document.getElementById('btn-toggle-test');
+  const clearBtn = document.getElementById('btn-clear-test');
+  if (btn) {
+    btn.textContent = _showTestEvents ? 'Hide test events' : 'Show test events';
+    btn.style.color = _showTestEvents ? 'var(--accent)' : 'var(--text3)';
+  }
+  if (clearBtn) clearBtn.style.display = _showTestEvents ? '' : 'none';
+  loadWebhooks(1);
+}
+
+async function clearTestEvents() {
+  if (!confirm('Delete all test events created by the simulator? This cannot be undone.')) return;
+  try {
+    const r = await apiFetch('/webhooks/simulated', { method: 'DELETE' });
+    const count = r?.deleted ?? 0;
+    toast(`Cleared ${count} test event${count !== 1 ? 's' : ''}`, 'success');
+    loadWebhooks(1);
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -1849,7 +1991,7 @@ function renderWebhooksTable(data, container, compact = false) {
     <tr data-id="${w.id}" onclick="openPanel('${w.id}')" class="${selectedWebhookId === w.id ? 'selected' : ''}">
       <td class="cell-mono">${w.id.substring(0, 8)}…</td>
       <td class="cell-url">${esc(w.destination_url)}</td>
-      <td><span class="badge ${w.status}">${w.status}</span></td>
+      <td><span class="badge ${w.status}">${w.status}</span>${w.is_simulation ? ' <span style="font-size:9px;font-weight:600;letter-spacing:.04em;border:1px solid var(--text3);color:var(--text3);border-radius:3px;padding:1px 4px;vertical-align:middle">TEST</span>' : ''}</td>
       <td>${w.retry_count}/${w.max_retries}</td>
       ${!compact ? `<td class="cell-mono" style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${esc(w.event_id?.substring(0,20) || '—')}</td>` : ''}
       <td class="cell-time">${relTime(w.created_at)}</td>
@@ -1871,10 +2013,7 @@ function renderWebhooksTable(data, container, compact = false) {
   `;
 }
 
-function debounceSearch() {
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => loadWebhooks(1), 400);
-}
+const debounceSearch = debounce(() => loadWebhooks(1), 400);
 
 // ---------------------------------------------------------------------------
 // Detail panel
@@ -1966,6 +2105,7 @@ async function loadDestinations() {
     renderDestTable();
     populateDestSelects();
     _loadDestRates();
+    _renderSuggestionBar();
   } catch {}
 }
 
@@ -2029,7 +2169,6 @@ function renderDestTable() {
       <td>
         <div class="dest-row-actions">
           <button class="btn btn-xs btn-secondary" title="Ping the endpoint to verify it responds" onclick="testDestination('${d.id}')">Ping</button>
-          <button class="btn btn-xs btn-secondary" title="Send a real test event through the delivery pipeline" onclick="sendTestEvent('${d.id}')">Test</button>
           <button class="btn btn-xs btn-secondary" onclick="viewDestSla('${d.id}','${esc(d.name)}')">SLA</button>
           <button class="btn btn-xs btn-secondary" onclick="openDestModal(destinations.find(x=>x.id==='${d.id}'))">Edit</button>
           <button class="btn btn-xs btn-danger" onclick="deleteDestination('${d.id}')">Delete</button>
@@ -2239,20 +2378,23 @@ async function loadAlerts() {
     const el = document.getElementById('alerts-list');
     if (!el) return;
     if (!alerts.length) {
-      el.innerHTML = `<div class="empty-state"><div class="icon">🔔</div><div class="title">No alert channels</div><div class="desc">Add Slack or email to get notified on DLQ events</div></div>`;
+      el.innerHTML = `<div class="empty-state"><div class="icon">🔔</div><div class="title">No alerts yet</div><div class="desc">Connect Slack or email and Relora will notify you the moment deliveries start failing.</div></div>`;
       return;
     }
     el.innerHTML = alerts.map(a => {
       const triggers = [];
-      if (a.dlq_threshold != null) triggers.push(`DLQ ≥ ${a.dlq_threshold}`);
-      if (a.error_rate_threshold != null) triggers.push(`rate < ${a.error_rate_threshold}%`);
-      const triggerText = triggers.length ? triggers.join(' · ') : 'Any DLQ event';
+      if (a.dlq_threshold != null) triggers.push(`${a.dlq_threshold}+ failures`);
+      if (a.error_rate_threshold != null) triggers.push(`success rate below ${a.error_rate_threshold}%`);
+      const triggerText = triggers.length ? triggers.join(' or ') : 'any failure';
+      const channelLabel = a.channel_type === 'slack' ? 'Slack' : 'Email';
+      const statusLabel = a.enabled ? 'Active' : 'Paused';
+      const statusColor = a.enabled ? 'color:var(--green)' : 'color:var(--text3)';
       return `
       <div class="alert-row">
         <div class="alert-icon">${a.channel_type === 'slack' ? '💬' : '📧'}</div>
         <div class="alert-info">
           <div class="alert-name">${esc(a.name)}</div>
-          <div class="alert-type">${a.channel_type} · ${a.enabled ? 'Enabled' : 'Disabled'} · Triggers: ${esc(triggerText)}</div>
+          <div class="alert-type">via ${channelLabel} · <span style="${statusColor}">${statusLabel}</span> · fires when: ${esc(triggerText)}</div>
         </div>
         <div class="alert-actions">
           <button class="btn btn-xs btn-secondary" onclick="testAlert('${a.id}')">Test</button>
@@ -2391,6 +2533,13 @@ async function startBulkReplay() {
   const destId = document.getElementById('replay-dest').value;
   const rate = parseInt(document.getElementById('replay-rate').value) || 100;
   if (!from || !to) { toast('Select a time window', 'error'); return; }
+
+  const windowDays = (new Date(to) - new Date(from)) / (1000 * 60 * 60 * 24);
+  if (windowDays > 1) {
+    const days = windowDays.toFixed(1);
+    if (!confirm(`Replay failed webhooks from the last ${days} days?\n\nThis will re-queue them for delivery at ${rate} events/min. Large windows may queue thousands of events.`)) return;
+  }
+
   try {
     const r = await apiFetch('/webhooks/replay-window', {
       method: 'POST',
@@ -2539,12 +2688,34 @@ function copyIngestUrl() {
 
 function confirmDeleteProject() {
   if (!currentProject) return;
-  const name = currentProject.name;
-  const confirmed = window.confirm(`Delete project "${name}"?\n\nThis will permanently remove all webhooks, destinations, and data. This action cannot be undone.`);
-  if (!confirmed) return;
-  apiFetch(`/projects/${currentProject.id}`, { method: 'DELETE' })
-    .then(() => { toast('Project deleted', 'success'); return loadProjects(); })
-    .catch(e => toast('Failed to delete: ' + e.message, 'error'));
+  const nameEl = document.getElementById('delete-project-name-display');
+  const input = document.getElementById('delete-project-confirm-input');
+  const btn = document.getElementById('delete-project-submit-btn');
+  if (nameEl) nameEl.textContent = currentProject.name;
+  if (input) { input.value = ''; input.placeholder = currentProject.name; }
+  if (btn) btn.disabled = true;
+  openModal('modal-delete-project');
+}
+
+function _checkDeleteConfirm() {
+  const input = document.getElementById('delete-project-confirm-input');
+  const btn = document.getElementById('delete-project-submit-btn');
+  if (!input || !btn || !currentProject) return;
+  btn.disabled = input.value.trim() !== currentProject.name;
+}
+
+async function _executeDeleteProject() {
+  if (!currentProject) return;
+  const input = document.getElementById('delete-project-confirm-input');
+  if (!input || input.value.trim() !== currentProject.name) return;
+  try {
+    await apiFetch(`/projects/${currentProject.id}`, { method: 'DELETE' });
+    closeModal('modal-delete-project');
+    toast('Project deleted', 'success');
+    projects = projects.filter(p => p.id !== currentProject.id);
+    currentProject = null;
+    await loadProjects();
+  } catch (e) { toast('Failed to delete: ' + e.message, 'error'); }
 }
 
 async function loadSigningSecrets() {
@@ -2836,95 +3007,60 @@ async function loadDLQIntelligence() {
   loadingEl.style.display = 'block';
   errorEl.style.display = 'none';
   contentEl.style.display = 'none';
-  
+
+  // Eagerly clean up orphaned incidents so the page never shows stale OPEN entries
+  if (_dlqDepth === 0) {
+    apiFetch('/dlq/resolve-all-incidents', { method: 'POST' }).catch(() => {});
+  }
+
   let hasError = false;
   let errorMessages = [];
-  
+
   // Load health data
   try {
-    const healthResponse = await fetch('/api/v1/dlq/health', {
-      credentials: 'include'
-    });
-    if (healthResponse.ok) {
-      const healthData = await healthResponse.json();
-      updateHealthScore(healthData);
-    } else {
-      errorMessages.push('Health data unavailable');
-      hasError = true;
-    }
+    const healthData = await apiFetch('/dlq/health');
+    updateHealthScore(healthData);
   } catch (error) {
     console.error('Error loading health data:', error);
     errorMessages.push('Health data unavailable');
     hasError = true;
   }
-  
+
   // Load incident summary
   try {
-    const incidentsResponse = await fetch('/api/v1/dlq/incidents?limit=100', {
-      credentials: 'include'
-    });
-    if (incidentsResponse.ok) {
-      const incidentsData = await incidentsResponse.json();
-      updateIncidentSummary(incidentsData);
-      updateActiveIncidents(incidentsData);
-    } else {
-      errorMessages.push('Incidents unavailable');
-      hasError = true;
-    }
+    const incidentsData = await apiFetch('/dlq/incidents?limit=100');
+    updateIncidentSummary(incidentsData);
+    updateActiveIncidents(incidentsData);
   } catch (error) {
     console.error('Error loading incidents:', error);
     errorMessages.push('Incidents unavailable');
     hasError = true;
   }
-  
+
   // Load classifications
   try {
-    const classificationsResponse = await fetch('/api/v1/dlq/classifications', {
-      credentials: 'include'
-    });
-    if (classificationsResponse.ok) {
-      const classificationsData = await classificationsResponse.json();
-      updateFailureBreakdown(classificationsData);
-    } else {
-      errorMessages.push('Classifications unavailable');
-      hasError = true;
-    }
+    const classificationsData = await apiFetch('/dlq/classifications');
+    updateFailureBreakdown(classificationsData);
   } catch (error) {
     console.error('Error loading classifications:', error);
     errorMessages.push('Classifications unavailable');
     hasError = true;
   }
-  
+
   // Load trends
   try {
-    const trendsResponse = await fetch('/api/v1/dlq/trends', {
-      credentials: 'include'
-    });
-    if (trendsResponse.ok) {
-      const trendsData = await trendsResponse.json();
-      updateTrendGraph(trendsData);
-    } else {
-      errorMessages.push('Trends unavailable');
-      hasError = true;
-    }
+    const trendsData = await apiFetch('/dlq/trends');
+    updateTrendGraph(trendsData);
   } catch (error) {
     console.error('Error loading trends:', error);
     errorMessages.push('Trends unavailable');
     hasError = true;
   }
-  
+
   // Load root causes
   try {
-    const rootCausesResponse = await fetch('/api/v1/dlq/root-causes', {
-      credentials: 'include'
-    });
-    if (rootCausesResponse.ok) {
-      const rootCausesData = await rootCausesResponse.json();
-      updateRootCauses(rootCausesData);
-    } else {
-      errorMessages.push('Root causes unavailable');
-      hasError = true;
-    }
+    const rootCausesData = await apiFetch('/dlq/root-causes');
+    updateRootCauses(rootCausesData);
   } catch (error) {
     console.error('Error loading root causes:', error);
     errorMessages.push('Root causes unavailable');
@@ -2961,7 +3097,7 @@ function updateHealthScore(healthData) {
 
   if (!valueEl || !statusEl || !descEl) return;
 
-  valueEl.textContent  = score;
+  valueEl.textContent  = status === 'HEALTHY' ? 100 : score;
   statusEl.textContent = status.charAt(0) + status.slice(1).toLowerCase();
 
   // Drive the score bar: height = score%, color = signal
@@ -2997,11 +3133,12 @@ function updateIncidentSummary(incidentsData) {
   const criticalEl = document.getElementById('critical-incidents');
   const affectedEl = document.getElementById('affected-destinations');
   
-  totalEl.textContent = incidents.length;
-  openEl.textContent = incidents.filter(i => i.state === 'OPEN').length;
-  criticalEl.textContent = incidents.filter(i => i.severity === 'critical' && i.state === 'OPEN').length;
-  
-  const uniqueDestinations = new Set(incidents.map(i => i.destination_id).filter(Boolean));
+  const active = incidents.filter(i => i.state === 'OPEN' || i.state === 'INVESTIGATING');
+  totalEl.textContent = active.length;
+  openEl.textContent = active.length;
+  criticalEl.textContent = active.filter(i => i.severity === 'critical').length;
+
+  const uniqueDestinations = new Set(active.map(i => i.destination_id).filter(Boolean));
   affectedEl.textContent = uniqueDestinations.size;
 }
 
@@ -3123,7 +3260,7 @@ function updateActiveIncidents(incidentsData) {
     const destName = esc(incident.destination_name || incident.failure_category || 'destination');
 
     return `
-      <div class="incident-item ${isCritical ? 'critical' : 'warning'}">
+      <div class="incident-item ${isCritical ? 'critical' : 'warning'}" data-incident-id="${incident.id}">
         <div class="incident-header">
           <span class="incident-title">${esc(incident.root_cause || incident.failure_category || 'Unknown')}</span>
           <span class="incident-state ${incident.state}">${incident.state}</span>
@@ -3149,14 +3286,31 @@ function updateActiveIncidents(incidentsData) {
 }
 
 async function resolveIncident(incidentId) {
+  // Optimistic removal so the card disappears immediately
+  const card = document.querySelector(`[data-incident-id="${incidentId}"]`);
+  if (card) card.remove();
   try {
     await apiFetch(`/dlq/incidents/${incidentId}/resolve`, { method: 'PATCH' });
     toast('Incident marked as resolved', 'success');
     loadDLQIntelligence();
-  } catch (e) { toast(e.message || 'Failed to resolve incident', 'error'); }
+  } catch (e) {
+    toast(e.message || 'Failed to resolve incident', 'error');
+    loadDLQIntelligence(); // restore the card if the call failed
+  }
+}
+
+async function clearAllFailedEvents() {
+  if (!confirm('Clear all failed delivery records? This permanently removes them from the queue and cannot be undone.')) return;
+  try {
+    const res = await apiFetch('/dlq/archive?older_than_days=0', { method: 'DELETE' });
+    toast(`Cleared ${res.archived ?? 0} failed event${res.archived !== 1 ? 's' : ''}`, 'success');
+    await _pollDLQState();
+    loadDLQIntelligence();
+  } catch (e) { toast(e.message || 'Failed to clear events', 'error'); }
 }
 
 async function replayDLQForDestination(destId, destName) {
+  if (!confirm(`Replay all failed webhooks for "${destName}" from the last 7 days?\n\nThis will re-queue them for delivery at 60 events/min.`)) return;
   const now = new Date();
   const from = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
   try {
@@ -3176,22 +3330,13 @@ async function replayDLQForDestination(destId, destName) {
 
 async function loadTopDestinations() {
   try {
-    const response = await fetch('/api/v1/destinations', {
-      credentials: 'include'
-    });
-    if (!response.ok) return;
-    
-    const destinationsData = await response.json();
+    const destinationsData = await apiFetch('/destinations');
     const destinations = destinationsData.destinations || [];
-    
+
     const container = document.getElementById('top-destinations');
     const healthPromises = destinations.slice(0, 5).map(async (dest) => {
       try {
-        const healthResponse = await fetch(`/api/v1/destinations/${dest.id}/health`, {
-          credentials: 'include'
-        });
-        if (!healthResponse.ok) return null;
-        return await healthResponse.json();
+        return await apiFetch(`/destinations/${dest.id}/health`);
       } catch (error) {
         console.error('Error loading destination health:', error);
         return null;
@@ -3322,14 +3467,24 @@ async function _renderRecoveryReplays() {
   const el = document.getElementById('recovery-replays-body');
   if (!el) return;
   try {
-    const data = await apiFetch('/webhooks/replay-jobs?limit=20');
-    const jobs = (data && data.jobs) ? data.jobs : (Array.isArray(data) ? data : []);
+    const data = await apiFetch('/replay-jobs?limit=20');
+    const jobs = Array.isArray(data) ? data : [];
     if (!jobs.length) {
       el.innerHTML = '<div class="empty-state"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg><div class="title">No replay history</div><div class="desc">Bulk replay jobs appear here after execution</div></div>';
       return;
     }
-    const rows = jobs.map(j => '<tr><td style="font-size:12px;color:var(--text3);font-family:var(--mono)">' + relTime(j.created_at) + '</td><td><span class="badge ' + (j.status === 'completed' ? 'completed' : j.status === 'running' ? 'processing' : 'pending') + '">' + esc(j.status || '—') + '</span></td><td style="font-family:var(--mono);font-size:12px">' + (j.total_events != null ? j.total_events : '—') + '</td><td style="font-family:var(--mono);font-size:12px;color:var(--success)">' + (j.delivered_count != null ? j.delivered_count : '—') + '</td><td style="font-family:var(--mono);font-size:12px;color:' + (j.failed_count > 0 ? 'var(--danger)' : 'var(--text3)') + '">' + (j.failed_count != null ? j.failed_count : '—') + '</td></tr>').join('');
-    el.innerHTML = '<table><thead><tr><th>Started</th><th>Status</th><th>Events</th><th>Delivered</th><th>Failed</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    const rows = jobs.map(j => {
+      const badgeCls = j.status === 'completed' ? 'completed' : j.status === 'running' ? 'processing' : 'pending';
+      const failed = j.failed_count ?? 0;
+      return '<tr>'
+        + '<td style="font-size:12px;color:var(--text3);font-family:var(--mono)">' + relTime(j.created_at) + '</td>'
+        + '<td><span class="badge ' + badgeCls + '">' + esc(j.status || '—') + '</span></td>'
+        + '<td style="font-family:var(--mono);font-size:12px">' + (j.total_count != null ? j.total_count : '—') + '</td>'
+        + '<td style="font-family:var(--mono);font-size:12px;color:var(--success)">' + (j.processed_count != null ? j.processed_count : '—') + '</td>'
+        + '<td style="font-family:var(--mono);font-size:12px;color:' + (failed > 0 ? 'var(--danger)' : 'var(--text3)') + '">' + (j.failed_count != null ? failed : '—') + '</td>'
+        + '</tr>';
+    }).join('');
+    el.innerHTML = '<table><thead><tr><th>Started</th><th>Status</th><th>Total</th><th>Delivered</th><th>Failed</th></tr></thead><tbody>' + rows + '</tbody></table>';
   } catch (e) {
     el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text3);font-size:13px">Replay history unavailable</div>';
   }

@@ -47,7 +47,7 @@ async def _get_project_by_api_key(db: AsyncSession, api_key: str) -> Project:
     result = await db.execute(select(Project).where(Project.api_key == api_key))
     project = result.scalar_one_or_none()
     if not project:
-        return Project(id=_uuid_mod.uuid4(), name="default", api_key=api_key)
+        raise HTTPException(404, "Project not found for this API key")
     return project
 
 
@@ -55,6 +55,7 @@ router = APIRouter()
 
 
 _MAX_BODY_BYTES = 1 * 1024 * 1024  # 1 MB — protects against memory exhaustion
+_MAX_REPLAY_BATCH = 10_000         # safety cap for replay-window jobs
 
 
 @router.post("/api/v1/ingest")
@@ -71,14 +72,15 @@ async def ingest_webhook(
     tenant_id: str = Depends(get_tenant_from_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    content_length = request.headers.get("content-length")
-    if content_length and int(content_length) > _MAX_BODY_BYTES:
-        raise HTTPException(413, f"Payload too large. Maximum size is {_MAX_BODY_BYTES // 1024} KB.")
-
     await check_rate_limit(request, tenant_id, db)
 
     if settings.MONTHLY_EVENT_QUOTA > 0:
         month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        # Lock the project row so that the count + subsequent insert are atomic.
+        # This prevents concurrent requests from simultaneously passing the quota check.
+        await db.execute(
+            select(Project.id).where(Project.api_key == tenant_id).with_for_update()
+        )
         monthly_usage = await db.scalar(
             select(func.count(Webhook.id)).where(
                 Webhook.tenant_id == tenant_id,
@@ -96,7 +98,11 @@ async def ingest_webhook(
     dest_id_obj: Optional[UUID] = None
 
     if destination_id:
-        dest_result = await db.execute(select(Destination).where(Destination.id == UUID(destination_id)))
+        dest_result = await db.execute(
+            select(Destination)
+            .join(Project, Project.id == Destination.project_id)
+            .where(Destination.id == UUID(destination_id), Project.api_key == tenant_id)
+        )
         dest_obj = dest_result.scalar_one_or_none()
         if not dest_obj:
             raise HTTPException(404, "Destination not found")
@@ -121,11 +127,23 @@ async def ingest_webhook(
 
     destination_urls = [validate_destination_url(d) for d in destination_candidates]
 
-    raw_body = await request.body()
+    # Stream-read with size cap — handles both Content-Length and chunked-encoding.
+    _body_chunks: list[bytes] = []
+    _bytes_read = 0
+    async for _chunk in request.stream():
+        _bytes_read += len(_chunk)
+        if _bytes_read > _MAX_BODY_BYTES:
+            raise HTTPException(413, f"Payload too large. Maximum size is {_MAX_BODY_BYTES // 1024} KB.")
+        _body_chunks.append(_chunk)
+    raw_body = b"".join(_body_chunks)
+
     ingest_secret: Optional[str] = None
     if signature_provider:
-        _proj = await _get_project_by_api_key(db, tenant_id)
-        _secrets = getattr(_proj, "source_secrets", None) or {}
+        # Use a direct query so a missing project simply means no per-project secret —
+        # the global signature secret from settings is the fallback.
+        _proj_r = await db.execute(select(Project).where(Project.api_key == tenant_id))
+        _proj_obj = _proj_r.scalar_one_or_none()
+        _secrets = (_proj_obj.source_secrets or {}) if _proj_obj else {}
         ingest_secret = _secrets.get(signature_provider.lower())
     verify_webhook_signature(signature_provider, request, raw_body, secret=ingest_secret)
 
@@ -176,8 +194,11 @@ async def ingest_webhook(
         if resolved:
             ordering_key = str(resolved)
 
-    if not event_matches_filter(payload, filter_expression):
-        return {"success": True, "filtered": True, "webhook_ids": [], "message": "Filtered, not queued"}
+    try:
+        if not event_matches_filter(payload, filter_expression):
+            return {"success": True, "filtered": True, "webhook_ids": [], "message": "Filtered, not queued"}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     delivery_payload = apply_transform(payload, transform)
 
@@ -226,6 +247,8 @@ async def ingest_webhook(
         db.add(webhook)
         try:
             await db.flush()
+            # NOTIFY within the same transaction — only delivered if commit succeeds.
+            await db.execute(text("SELECT pg_notify('new_webhook', '')"))
             await db.commit()
             webhook_ids.append(str(webhook.id))
         except IntegrityError:
@@ -258,6 +281,22 @@ async def ingest_webhook(
     }
 
 
+@router.delete("/api/v1/webhooks/simulated", status_code=200)
+async def clear_simulated_webhooks(
+    tenant_id: str = Depends(get_tenant_from_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import delete as sa_delete
+    result = await db.execute(
+        sa_delete(Webhook).where(
+            Webhook.tenant_id == tenant_id,
+            Webhook.is_simulation == True,
+        )
+    )
+    await db.commit()
+    return {"deleted": result.rowcount}
+
+
 @router.get("/api/v1/webhooks")
 async def list_webhooks(
     status_filter: Optional[str] = Query(None, alias="status"),
@@ -265,12 +304,17 @@ async def list_webhooks(
     limit: int = Query(25, ge=1, le=100),
     search: Optional[str] = Query(None),
     destination_id: Optional[str] = Query(None),
+    exclude_simulations: bool = Query(False),
     tenant_id: str = Depends(get_tenant_from_auth),
     db: AsyncSession = Depends(get_db),
 ):
     offset = (page - 1) * limit
     stmt = select(Webhook).where(Webhook.tenant_id == tenant_id).order_by(desc(Webhook.created_at))
     count_stmt = select(func.count(Webhook.id)).where(Webhook.tenant_id == tenant_id)
+
+    if exclude_simulations:
+        stmt = stmt.where(Webhook.is_simulation == False)
+        count_stmt = count_stmt.where(Webhook.is_simulation == False)
 
     if status_filter:
         try:
@@ -337,8 +381,19 @@ async def replay_webhook(
     wh = result.scalar_one_or_none()
     if not wh:
         raise HTTPException(404, "Webhook not found")
+
+    # Reset max_retries to the destination's current value so webhooks that
+    # originally had max_retries=0 (e.g. test events) don't instantly DLQ on replay.
+    new_max_retries = settings.DEFAULT_MAX_RETRIES
+    if wh.destination_id:
+        dest_r = await db.execute(select(Destination).where(Destination.id == wh.destination_id))
+        dest = dest_r.scalar_one_or_none()
+        if dest:
+            new_max_retries = dest.max_retries
+
     wh.status = WebhookStatus.PENDING.value
     wh.retry_count = 0
+    wh.max_retries = new_max_retries
     wh.next_attempt_at = datetime.now(timezone.utc)
     wh.updated_at = datetime.now(timezone.utc)
     from app.audit import audit as _audit
@@ -358,19 +413,32 @@ async def replay_time_window(
     to_time = datetime.fromisoformat(body["to_time"].replace("Z", "+00:00"))
     dest_id = body.get("destination_id")
     rate = int(body.get("replay_rate_per_minute", 100))
+    # Default True: only replay failed webhooks to prevent accidental re-delivery
+    # of already-completed or in-flight events.
+    only_failed: bool = body.get("only_failed", True)
+    force: bool = body.get("force", False)
 
     project = await _get_project_by_api_key(db, tenant_id)
 
+    status_clause = "AND status = 'failed'" if only_failed else ""
     count_r = await db.execute(
-        text("""
+        text(f"""
         SELECT COUNT(*) FROM webhooks
         WHERE tenant_id = :tid AND created_at BETWEEN :from_t AND :to_t
           AND (:dest_id IS NULL OR destination_id = :dest_id::uuid)
+          {status_clause}
         """),
         {"tid": tenant_id, "from_t": from_time, "to_t": to_time,
          "dest_id": dest_id},
     )
     total = count_r.scalar() or 0
+
+    if total > _MAX_REPLAY_BATCH and not force:
+        raise HTTPException(
+            400,
+            f"Replay would affect {total:,} events, exceeding the {_MAX_REPLAY_BATCH:,}-event limit. "
+            "Pass force=true to proceed anyway.",
+        )
 
     job = ReplayJob(
         project_id=project.id,
@@ -385,7 +453,7 @@ async def replay_time_window(
     await db.commit()
     await db.refresh(job)
 
-    _fire_and_forget(_execute_replay_job(str(job.id), tenant_id, from_time, to_time, dest_id, rate))
+    _fire_and_forget(_execute_replay_job(str(job.id), tenant_id, from_time, to_time, dest_id, rate, only_failed))
 
     return {
         "job_id": str(job.id),
@@ -394,51 +462,67 @@ async def replay_time_window(
     }
 
 
-async def _execute_replay_job(job_id: str, tenant_id: str, from_time, to_time, dest_id, rate: int):
+async def _execute_replay_job(job_id: str, tenant_id: str, from_time, to_time, dest_id, rate: int, only_failed: bool = True):
     from app.db import async_session as _session
+
+    # Phase 1: mark running and fetch all IDs with a short-lived session.
+    status_clause = "AND status = 'failed'" if only_failed else ""
     async with _session() as db:
-        try:
-            await db.execute(
-                text("UPDATE replay_jobs SET status='running', updated_at=NOW() WHERE id=:id"),
-                {"id": job_id},
-            )
-            await db.commit()
+        await db.execute(
+            text("UPDATE replay_jobs SET status='running', updated_at=NOW() WHERE id=:id"),
+            {"id": job_id},
+        )
+        await db.commit()
+        result = await db.execute(
+            text(f"""
+            SELECT id FROM webhooks
+            WHERE tenant_id = :tid AND created_at BETWEEN :from_t AND :to_t
+              AND (:dest_id IS NULL OR destination_id = :dest_id::uuid)
+              {status_clause}
+            ORDER BY created_at ASC
+            """),
+            {"tid": tenant_id, "from_t": from_time, "to_t": to_time, "dest_id": dest_id},
+        )
+        rows = result.fetchall()
 
-            result = await db.execute(
-                text("""
-                SELECT id FROM webhooks
-                WHERE tenant_id = :tid AND created_at BETWEEN :from_t AND :to_t
-                  AND (:dest_id IS NULL OR destination_id = :dest_id::uuid)
-                ORDER BY created_at ASC
-                """),
-                {"tid": tenant_id, "from_t": from_time, "to_t": to_time, "dest_id": dest_id},
-            )
-            rows = result.fetchall()
-
-            delay_per_item = 60.0 / rate if rate > 0 else 0.1
-            for i, row in enumerate(rows):
-                await db.execute(
+    # Phase 2: process each item with a fresh session so the DB connection is
+    # released during the inter-item sleep (prevents pool exhaustion on long replays).
+    delay_per_item = 60.0 / rate if rate > 0 else 0.1
+    try:
+        processed = 0
+        for row in rows:
+            async with _session() as db:
+                upd = await db.execute(
                     text("""
                     UPDATE webhooks SET status='pending', retry_count=0,
+                      max_retries=COALESCE(
+                        (SELECT d.max_retries FROM destinations d WHERE d.id = webhooks.destination_id),
+                        :default_mr
+                      ),
                       next_attempt_at=NOW(), updated_at=NOW()
                     WHERE id=:id
+                    RETURNING id
                     """),
-                    {"id": row.id},
+                    {"id": row.id, "default_mr": settings.DEFAULT_MAX_RETRIES},
                 )
+                processed += len(upd.fetchall())
                 await db.execute(
                     text("UPDATE replay_jobs SET processed_count=:n, updated_at=NOW() WHERE id=:id"),
-                    {"n": i + 1, "id": job_id},
+                    {"n": processed, "id": job_id},
                 )
+                await db.execute(text("SELECT pg_notify('new_webhook', '')"))
                 await db.commit()
-                await asyncio.sleep(delay_per_item)
+            await asyncio.sleep(delay_per_item)
 
+        async with _session() as db:
             await db.execute(
                 text("UPDATE replay_jobs SET status='completed', updated_at=NOW() WHERE id=:id"),
                 {"id": job_id},
             )
             await db.commit()
-        except Exception as exc:
-            logger.error("Replay job failed: %s", exc, exc_info=True)
+    except Exception as exc:
+        logger.error("Replay job failed: %s", exc, exc_info=True)
+        async with _session() as db:
             await db.execute(
                 text("UPDATE replay_jobs SET status='failed', error_message=:err, updated_at=NOW() WHERE id=:id"),
                 {"err": str(exc), "id": job_id},

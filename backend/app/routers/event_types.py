@@ -19,7 +19,7 @@ async def _get_project_by_api_key(db: AsyncSession, api_key: str) -> Project:
     result = await db.execute(select(Project).where(Project.api_key == api_key))
     project = result.scalar_one_or_none()
     if not project:
-        return Project(id=_uuid_mod.uuid4(), name="default", api_key=api_key)
+        raise HTTPException(404, "Project not found for this API key")
     return project
 
 

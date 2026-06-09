@@ -82,9 +82,8 @@ def test_filter_none_matches_all():
 
 
 def test_filter_invalid_expression_raises():
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(ValueError):
         event_matches_filter(PAYLOAD, "invalid expression here")
-    assert exc.value.status_code == 400
 
 
 # ── apply_json_map ────────────────────────────────────────────────────────

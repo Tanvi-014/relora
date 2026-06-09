@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    Boolean, Column, DateTime, Float, ForeignKey,
+    Boolean, CheckConstraint, Column, DateTime, Float, ForeignKey,
     Index, Integer, Numeric, String, Text, UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -144,11 +144,22 @@ class Webhook(Base):
         Index("ix_webhooks_tenant_created_at", "tenant_id", "created_at"),
         Index("ix_webhooks_event_id", "event_id"),
         Index("ix_webhooks_ordering_key", "ordering_key"),
+        # Compound index for the CLAIM_QUERY NOT EXISTS subquery:
+        # filters on ordering_key = ? AND status = 'processing' AND updated_at >= ?
+        Index(
+            "ix_webhooks_ordering_key_status",
+            "ordering_key", "status",
+            postgresql_where="ordering_key IS NOT NULL",
+        ),
         Index(
             "ix_webhooks_tenant_destination_idempotency_key",
             "tenant_id", "destination_url", "idempotency_key",
             unique=True,
             postgresql_where="idempotency_key IS NOT NULL",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'processing', 'completed', 'failed')",
+            name="chk_webhook_status",
         ),
     )
 
@@ -201,6 +212,7 @@ class DeliveryAttempt(Base):
         Index("ix_delivery_attempts_webhook_id_attempt_number", "webhook_id", "attempt_number"),
         Index("ix_delivery_attempts_failure_category", "failure_category"),
         Index("ix_delivery_attempts_error_signature", "error_signature"),
+        Index("ix_delivery_attempts_attempted_at", "attempted_at"),
     )
 
 
@@ -386,13 +398,15 @@ class Project(Base):
     event_types = relationship("EventType", back_populates="project", cascade="all, delete-orphan")
     replay_jobs = relationship("ReplayJob", back_populates="project", cascade="all, delete-orphan")
 
-    def to_dict(self):
-        return {
+    def to_dict(self, *, include_api_key: bool = False):
+        d = {
             "id": str(self.id),
             "name": self.name,
-            "api_key": self.api_key,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+        if include_api_key:
+            d["api_key"] = self.api_key
+        return d
 
 
 class ProjectMember(Base):

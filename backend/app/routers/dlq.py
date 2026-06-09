@@ -52,8 +52,17 @@ async def get_dlq_incidents(
     """Get all incidents with optional filtering."""
     offset = (page - 1) * limit
 
-    query = select(Incident).order_by(desc(Incident.last_seen_at))
-    count_query = select(func.count(Incident.id))
+    # Always scope to the current tenant's projects
+    tenant_project_ids = select(Project.id).where(Project.api_key == tenant_id)
+
+    query = (
+        select(Incident)
+        .where(Incident.project_id.in_(tenant_project_ids))
+        .order_by(desc(Incident.last_seen_at))
+    )
+    count_query = select(func.count(Incident.id)).where(
+        Incident.project_id.in_(tenant_project_ids)
+    )
 
     if project_id:
         query = query.where(Incident.project_id == UUID(project_id))
@@ -84,19 +93,22 @@ async def get_dlq_classifications(
     db: AsyncSession = Depends(get_db),
 ):
     """Get failure classification breakdown."""
+    # Only count attempts whose parent webhook is still failed
     query = select(
         DeliveryAttempt.failure_category,
         func.count(DeliveryAttempt.id).label("count"),
+    ).join(
+        Webhook, DeliveryAttempt.webhook_id == Webhook.id
     ).where(
-        DeliveryAttempt.failure_category.isnot(None)
+        DeliveryAttempt.failure_category.isnot(None),
+        Webhook.status == "failed",
+        Webhook.is_simulation == False,  # noqa: E712
     ).group_by(DeliveryAttempt.failure_category).order_by(
         func.count(DeliveryAttempt.id).desc()
     )
 
     if project_id:
-        query = query.join(Webhook, DeliveryAttempt.webhook_id == Webhook.id).where(
-            Webhook.project_id == UUID(project_id)
-        )
+        query = query.where(Webhook.project_id == UUID(project_id))
 
     result = await db.execute(query)
     rows = result.all()
@@ -256,7 +268,11 @@ async def resolve_incident(
     db: AsyncSession = Depends(get_db),
 ):
     """Manually resolve/dismiss an incident."""
-    result = await db.execute(select(Incident).where(Incident.id == UUID(incident_id)))
+    result = await db.execute(
+        select(Incident)
+        .join(Project, Project.id == Incident.project_id)
+        .where(Incident.id == UUID(incident_id), Project.api_key == tenant_id)
+    )
     incident = result.scalar_one_or_none()
     if not incident:
         raise HTTPException(404, "Incident not found")
@@ -266,9 +282,46 @@ async def resolve_incident(
     return {"success": True, "incident_id": incident_id, "state": "RESOLVED"}
 
 
+@router.post("/api/v1/dlq/resolve-all-incidents")
+async def resolve_all_incidents(
+    tenant_id: str = Depends(get_tenant_from_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Resolve all open incidents that have no remaining failed webhooks."""
+    open_incidents_result = await db.execute(
+        select(Incident)
+        .join(Project, Project.id == Incident.project_id)
+        .where(
+            Incident.state.in_(["OPEN", "INVESTIGATING"]),
+            Project.api_key == tenant_id,
+        )
+    )
+    open_incidents = open_incidents_result.scalars().all()
+
+    now = datetime.now(timezone.utc)
+    resolved = 0
+    for incident in open_incidents:
+        # Only auto-resolve if no failed (non-simulation) webhooks remain for this project
+        remaining = await db.scalar(
+            select(func.count(Webhook.id)).where(
+                Webhook.project_id == incident.project_id,
+                Webhook.status == "failed",
+                Webhook.is_simulation == False,  # noqa: E712
+            )
+        ) or 0
+        if remaining == 0:
+            incident.state = "RESOLVED"
+            incident.resolved_at = now
+            resolved += 1
+
+    if resolved:
+        await db.commit()
+    return {"resolved": resolved}
+
+
 @router.delete("/api/v1/dlq/archive")
 async def archive_dlq(
-    older_than_days: int = Query(30, ge=1, le=365, description="Archive failed webhooks older than N days"),
+    older_than_days: int = Query(30, ge=0, le=365, description="Archive failed webhooks older than N days (0 = all failed)"),
     dry_run: bool = Query(False, description="Count rows without deleting"),
     tenant_id: str = Depends(get_tenant_from_auth),
     db: AsyncSession = Depends(get_db),
@@ -306,6 +359,23 @@ async def archive_dlq(
         delete_stmt,
         {"tenant_id": tenant_id, "interval": f"{older_than_days} days"},
     )
+
+    # When clearing all failed events (older_than_days=0), also resolve all open incidents
+    # so nothing is left dangling in the UI.
+    if older_than_days == 0:
+        open_incidents = await db.execute(
+            select(Incident).where(
+                Incident.state.in_(["OPEN", "INVESTIGATING"]),
+                Incident.project_id.in_(
+                    select(Project.id).where(Project.api_key == tenant_id)
+                ),
+            )
+        )
+        now = datetime.now(timezone.utc)
+        for incident in open_incidents.scalars().all():
+            incident.state = "RESOLVED"
+            incident.resolved_at = now
+
     await db.commit()
 
     logger.info(

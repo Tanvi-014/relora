@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     # JWT — MUST be overridden in production
     JWT_SECRET: str = "change-this-secret-in-production-use-openssl-rand-hex-32"
     JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRY_DAYS: int = 7
+    JWT_EXPIRY_DAYS: int = 1
 
     # Cookie settings
     COOKIE_SECURE: bool = False   # True in production (HTTPS only)

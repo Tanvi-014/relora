@@ -17,7 +17,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.alerts import dispatch_dlq_alert
-from app.circuit_breaker import should_deliver, record_outcome
+from app.circuit_breaker import should_deliver, record_outcome, HALF_OPEN_TIMEOUT
 from app.telemetry import record_delivered, record_delivery_failed, record_dlq
 from app.config import settings
 from app.db import async_session
@@ -32,6 +32,9 @@ from app.websocket_hub import ws_manager
 
 configure_logging()
 logger = logging.getLogger("relora.worker")
+
+# Set by the LISTEN/NOTIFY watcher in worker_main to wake idle workers immediately.
+_wake_workers: asyncio.Event = asyncio.Event()
 
 # FIFO-aware claim query:
 # - Ordered webhooks (ordering_key set) are delivered strictly by creation order.
@@ -50,6 +53,7 @@ WITH eligible AS (
         SELECT 1 FROM webhooks w2
         WHERE w2.ordering_key = w.ordering_key
           AND w2.status = 'processing'
+          AND w2.updated_at >= NOW() - INTERVAL '15 minutes'
       )
     )
   ORDER BY
@@ -108,13 +112,20 @@ class WebhookWorker:
     async def _run_loop(self):
         async with httpx.AsyncClient(
             timeout=settings.HTTP_CLIENT_TIMEOUT_SECONDS,
-            follow_redirects=True,
+            follow_redirects=False,
         ) as client:
             while self.is_running:
                 try:
                     processed = await self._process_next_job(client)
                     if not processed:
-                        await asyncio.sleep(settings.WORKER_POLL_INTERVAL_SECONDS)
+                        _wake_workers.clear()
+                        try:
+                            await asyncio.wait_for(
+                                _wake_workers.wait(),
+                                timeout=settings.WORKER_POLL_INTERVAL_SECONDS,
+                            )
+                        except asyncio.TimeoutError:
+                            pass
                 except asyncio.CancelledError:
                     break
                 except Exception:
@@ -156,10 +167,13 @@ class WebhookWorker:
                             "webhook_id": str(webhook_id),
                             "destination_id": str(destination_id),
                         })
-                        # Revert to pending so it will be retried once circuit re-opens
+                        # Revert to pending and back-off until the circuit's cooldown elapses,
+                        # preventing a tight re-claim loop while the circuit is open.
+                        from datetime import timedelta
+                        circuit_cooldown = datetime.now(timezone.utc) + timedelta(seconds=HALF_OPEN_TIMEOUT * 60)
                         await session.execute(
-                            text("UPDATE webhooks SET status='pending', updated_at=NOW() WHERE id=:id"),
-                            {"id": webhook_id},
+                            text("UPDATE webhooks SET status='pending', next_attempt_at=:na, updated_at=NOW() WHERE id=:id"),
+                            {"na": circuit_cooldown, "id": webhook_id},
                         )
                         await session.commit()
                         return True

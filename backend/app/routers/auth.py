@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 
 from fastapi import APIRouter, Body, Cookie, Depends, HTTPException, Query, Request, Response
@@ -158,6 +159,8 @@ async def request_verification_email(
     whether the address exists or not.
     """
     await check_rate_limit(request, "anonymous", db, max_per_minute=settings.AUTH_RATE_LIMIT_PER_MINUTE)
+    _email_key = "email:" + hashlib.sha256(email.lower().encode()).hexdigest()[:16]
+    await check_rate_limit(request, _email_key, db, max_per_minute=5)
     if not settings.RESEND_API_KEY:
         raise HTTPException(503, "Email sending is not configured on this server.")
     result = await db.execute(select(User).where(User.email == email))
@@ -180,6 +183,8 @@ async def forgot_password(
     whether the address exists or not.
     """
     await check_rate_limit(request, "anonymous", db, max_per_minute=settings.AUTH_RATE_LIMIT_PER_MINUTE)
+    _email_key = "email:" + hashlib.sha256(email.lower().encode()).hexdigest()[:16]
+    await check_rate_limit(request, _email_key, db, max_per_minute=5)
     if not settings.RESEND_API_KEY:
         raise HTTPException(503, "Email sending is not configured on this server.")
     result = await db.execute(select(User).where(User.email == email))

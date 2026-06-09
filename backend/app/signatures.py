@@ -1,6 +1,6 @@
 import hmac
 import time
-from hashlib import sha1, sha256
+from hashlib import sha256
 from typing import Optional
 
 from fastapi import HTTPException, Request, status
@@ -86,7 +86,11 @@ def _verify_github(request: Request, raw_body: bytes, secret: str) -> None:
 
 def _verify_relora(request: Request, raw_body: bytes, secret: str) -> None:
     algorithm = request.headers.get("X-Relora-Signature-Algorithm", "sha256").lower()
-    digest = sha1 if algorithm == "sha1" else sha256
-    expected = hmac.new(secret.encode("utf-8"), raw_body, digest).hexdigest()
+    if algorithm != "sha256":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported signature algorithm. Only sha256 is accepted.",
+        )
+    expected = hmac.new(secret.encode("utf-8"), raw_body, sha256).hexdigest()
     if not _compare_digest(expected, request.headers.get("X-Relora-Signature")):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Relora signature verification failed")

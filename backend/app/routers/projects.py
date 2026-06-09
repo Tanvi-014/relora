@@ -19,8 +19,7 @@ async def _get_project_by_api_key(db: AsyncSession, api_key: str) -> Project:
     result = await db.execute(select(Project).where(Project.api_key == api_key))
     project = result.scalar_one_or_none()
     if not project:
-        # For anonymous / legacy tenants create a virtual project
-        return Project(id=_uuid_mod.uuid4(), name="default", api_key=api_key)
+        raise HTTPException(404, "Project not found for this API key")
     return project
 
 
@@ -42,8 +41,9 @@ async def list_projects(current_user: User = Depends(get_current_user), db: Asyn
             )
         )
         m = mr.scalar_one_or_none()
-        d = p.to_dict()
-        d["role"] = m.role if m else None
+        role = m.role if m else None
+        d = p.to_dict(include_api_key=role in ("owner", "admin"))
+        d["role"] = role
         out.append(d)
     return out
 
@@ -62,7 +62,7 @@ async def create_project(
     await audit(db, request, str(current_user.id), "CREATE", "project", str(project.id), after={"name": name})
     await db.commit()
     await db.refresh(project)
-    d = project.to_dict()
+    d = project.to_dict(include_api_key=True)
     d["role"] = "owner"
     return d
 
@@ -86,7 +86,7 @@ async def get_project(
     m = mr.scalar_one_or_none()
     if not m:
         raise HTTPException(403, "No access")
-    d = project.to_dict()
+    d = project.to_dict(include_api_key=m.role in ("owner", "admin"))
     d["role"] = m.role
     return d
 
@@ -104,7 +104,7 @@ async def delete_project(
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(404, "Project not found")
-    await audit(db, request, str(current_user.id), "DELETE", "project", str(project_id), before=project.to_dict())
+    await audit(db, request, str(current_user.id), "DELETE", "project", str(project_id), before=project.to_dict(include_api_key=True))
     await db.delete(project)
     await db.commit()
     return Response(status_code=204)

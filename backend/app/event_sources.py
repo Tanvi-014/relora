@@ -147,10 +147,22 @@ async def ingest_aws_sns(
     if msg_type == "SubscriptionConfirmation":
         subscribe_url = envelope.get("SubscribeURL")
         if subscribe_url:
+            # Guard against SSRF: the URL must be an https:// Amazon endpoint.
+            from urllib.parse import urlparse as _urlparse
+            _parsed = _urlparse(subscribe_url)
+            if _parsed.scheme != "https" or not (
+                _parsed.hostname or ""
+            ).endswith(".amazonaws.com"):
+                logger.warning(
+                    "SNS SubscribeURL rejected — not an amazonaws.com HTTPS URL: %s",
+                    subscribe_url,
+                )
+                raise HTTPException(400, "SNS SubscribeURL must be an https://*.amazonaws.com URL")
+
             import httpx
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(follow_redirects=False, timeout=10) as client:
                 try:
-                    await client.get(subscribe_url, timeout=10)
+                    await client.get(subscribe_url)
                     logger.info("SNS subscription confirmed for topic %s", envelope.get("TopicArn"))
                 except Exception as exc:
                     logger.warning("SNS subscription confirmation failed: %s", exc)

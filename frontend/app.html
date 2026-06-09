@@ -4,11 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Relora — Dashboard</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%230B0F14'/%3E%3Cpolyline points='2,12 7,12 9,5 11,19 13,12 22,12' fill='none' stroke='%2300D47E' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="app-identity.css">
+  <link rel="stylesheet" href="demo-journey.css">
 </head>
 <body>
 <div id="app">
@@ -18,14 +20,14 @@
     <a class="header-logo" href="/app.html">
       <div class="logo-icon">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-          <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/>
+          <polyline points="2,12 7,12 9,5 11,19 13,12 22,12"/>
         </svg>
       </div>
       Relora
     </a>
 
     <!-- Project switcher — left of search for project context -->
-    <div class="project-switcher" id="ps-trigger">
+    <div class="project-switcher" id="ps-trigger" onclick="togglePSDropdown(event)">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18M3 12h18M3 17h18"/></svg>
       <span class="ps-name" id="ps-name">Loading…</span>
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
@@ -67,7 +69,7 @@
       <!-- Notification bell -->
       <div class="notif-btn-wrap" id="notif-btn-wrap">
         <button class="notif-btn" id="notif-btn" onclick="toggleNotifPanel(event)" aria-label="Notifications">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
             <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
           </svg>
@@ -99,12 +101,6 @@
     </div>
   </header>
 
-  <!-- Setup progress strip — visible until all 3 onboarding steps are complete -->
-  <div id="setup-strip" style="display:none">
-    <div id="setup-strip-inner"></div>
-    <button class="setup-strip-dismiss" onclick="_dismissSetupStrip()" title="Dismiss">×</button>
-  </div>
-
   <!-- ── Body ── -->
   <div class="main-body">
     <!-- ── Sidebar ── -->
@@ -127,12 +123,12 @@
         <span class="nav-fail-count hidden" id="failed-badge">0</span>
       </div>
 
-      <div class="nav-item" data-page="recovery" onclick="navTo('recovery')">
+      <div class="nav-item" data-page="dlq-intelligence" onclick="navTo('dlq-intelligence')">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-          <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
         </svg>
-        Fix &amp; Replay
+        Failed Deliveries
+        <span class="nav-fail-count hidden" id="dlq-nav-badge">0</span>
       </div>
 
       <div class="nav-item" data-page="destinations" onclick="navTo('destinations')">
@@ -142,6 +138,13 @@
           <line x1="3" y1="12" x2="9" y2="12"/><line x1="15" y1="12" x2="21" y2="12"/>
         </svg>
         Destinations
+      </div>
+
+      <div class="nav-item" data-page="recovery" onclick="navTo('recovery')">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/>
+        </svg>
+        Fix &amp; Replay
       </div>
 
       <div class="nav-divider"></div>
@@ -166,14 +169,6 @@
       <div class="nav-divider"></div>
 
       <!-- Utility — visually quieter -->
-      <div class="nav-item nav-item--utility" data-page="dlq-intelligence" onclick="navTo('dlq-intelligence')">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v3l2 2"/>
-        </svg>
-        Failed Deliveries
-        <span class="nav-fail-count hidden" id="dlq-nav-badge" style="display:none">0</span>
-      </div>
-
       <div class="nav-item nav-item--utility" data-page="analytics" onclick="navTo('analytics')">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
           <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
@@ -237,6 +232,9 @@
     <div style="display:flex;flex:1;overflow:hidden">
       <div class="content" id="content-area">
 
+        <!-- ── First-time suggestion bar — cross-page onboarding guide ── -->
+        <div id="suggestion-bar" style="display:none"></div>
+
         <!-- ── System Pulse — one-line heartbeat on all non-overview pages ── -->
         <div class="page-pulse" id="page-pulse">
           <div class="pp-dot" id="pp-dot"></div>
@@ -299,45 +297,8 @@
             </div>
           </div>
 
-          <!-- Next Recommended Action — contextual guided setup -->
-          <div id="nra-card" class="nra-card" style="display:none">
-            <div class="nra-eyebrow">Next recommended action</div>
-            <div id="nra-body"></div>
-          </div>
-
-          <!-- Onboarding — shown only when no destinations / no activity -->
-          <div id="onboarding-card" class="mc-onboard-card" style="display:none">
-            <div class="mc-ob-label">Get started</div>
-            <div class="mc-ob-steps">
-              <div class="mc-ob-step" id="ob-step-1" onclick="navTo('destinations')" style="cursor:pointer">
-                <div class="mc-ob-num" id="ob-num-1">1</div>
-                <div class="mc-ob-body">
-                  <div class="mc-ob-title">Add a destination</div>
-                  <div class="mc-ob-sub">Tell Relora where to deliver webhooks</div>
-                </div>
-                <div class="mc-ob-cta">→</div>
-              </div>
-              <div class="mc-ob-step" id="ob-step-2" onclick="navTo('settings')" style="cursor:pointer">
-                <div class="mc-ob-num" id="ob-num-2">2</div>
-                <div class="mc-ob-body">
-                  <div class="mc-ob-title">Point your source at Relora</div>
-                  <div class="mc-ob-sub">Copy your API key from Settings and configure your ingest endpoint</div>
-                </div>
-                <div class="mc-ob-cta">→</div>
-              </div>
-              <div class="mc-ob-step" id="ob-step-3">
-                <div class="mc-ob-num" id="ob-num-3">3</div>
-                <div class="mc-ob-body">
-                  <div class="mc-ob-title">Send your first webhook</div>
-                  <div class="mc-ob-sub">POST to your ingest URL with your API key — events appear live here</div>
-                  <details style="margin-top:8px">
-                    <summary style="font-size:11px;color:var(--accent-light);cursor:pointer;user-select:none">Show example</summary>
-                    <pre id="ob-curl-example" style="margin-top:8px;font-size:10px;font-family:var(--mono);background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px;color:var(--text2);overflow-x:auto;white-space:pre;line-height:1.5"></pre>
-                  </details>
-                </div>
-              </div>
-            </div>
-          </div>
+          <!-- First-delivery celebration — shown by _triggerFirstDeliveryCelebration only -->
+          <div id="onboarding-section" class="obs-card" style="display:none"></div>
 
           <!-- Triage — surfaced only when action is required -->
           <div class="mc-triage" id="mc-triage" style="display:none">
@@ -477,22 +438,17 @@
               <div class="page-subtitle" style="margin-bottom:0">Configure where Relora delivers events. Each destination has independent retry settings, health monitoring, and delivery tracking.</div>
             </div>
             <div style="display:flex;gap:8px">
-              <button class="btn btn-secondary" onclick="openSimModal()">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                Send Test Event
-              </button>
               <button class="btn btn-primary" onclick="openDestModal()">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
                 New Destination
               </button>
             </div>
           </div>
-          <!-- Ingest URL bar — always visible so users know where to point their sources -->
-          <div style="background:rgba(0,212,126,.05);border:1px solid rgba(0,212,126,.15);border-radius:7px;padding:10px 14px;margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-            <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--success);font-family:var(--mono);white-space:nowrap">Ingest URL</span>
-            <input id="dest-ingest-url" readonly style="flex:1;min-width:200px;background:transparent;border:none;outline:none;font-family:var(--mono);font-size:12px;color:var(--text2);" value="">
-            <button class="btn btn-secondary btn-sm" onclick="copyIngestUrl()" style="white-space:nowrap">Copy</button>
-            <span style="font-size:11px;color:var(--text3)">Point Stripe, GitHub, Shopify — any source — at this URL</span>
+          <!-- Ingest URL -->
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+            <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);white-space:nowrap">Ingest URL</span>
+            <input id="dest-ingest-url" readonly style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:5px 10px;font-family:var(--mono);font-size:12px;color:var(--text2);outline:none" value="">
+            <button class="btn btn-secondary btn-sm" onclick="copyIngestUrl()">Copy</button>
           </div>
 
           <!-- Circuit breaker open banner (shown when any dest is open) -->
@@ -538,7 +494,7 @@
             </div>
             <button class="btn btn-primary" onclick="openAlertModal()">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
-              New Alert Channel
+              New Alert
             </button>
           </div>
           <div id="alerts-list"></div>
@@ -645,14 +601,10 @@
             </div>
 
             <div class="settings-section">
-              <div class="settings-section-title">Webhook Ingestion</div>
-              <div style="margin-bottom:6px;font-size:13px;font-weight:500;color:var(--text)">Ingestion Endpoint</div>
-              <div style="display:flex;gap:8px;margin-bottom:6px">
-                <input class="input" id="settings-ingest-url" readonly style="font-family:var(--mono);font-size:12px" value="">
+              <div class="settings-section-title">Ingest URL</div>
+              <div style="display:flex;gap:8px">
+                <input class="input" id="settings-ingest-url" readonly style="font-family:var(--mono);font-size:12px;flex:1" value="">
                 <button class="btn btn-secondary btn-sm" onclick="copyIngestUrl()">Copy</button>
-              </div>
-              <div style="font-size:12px;color:var(--text3)">
-                <span class="inline-code">POST</span> to this URL to ingest a webhook event. Include your API key in the header.
               </div>
             </div>
 
@@ -714,14 +666,11 @@
             </div>
             <div class="dlq-inv-header-right">
               <div class="dlq-inv-counters">
-                <div class="dlq-inv-counter">
-                  <span class="dlq-inv-counter-num" id="total-incidents">—</span>
-                  <span class="dlq-inv-counter-lbl">incidents</span>
-                </div>
                 <div class="dlq-inv-counter dlq-inv-counter--warn">
-                  <span class="dlq-inv-counter-num" id="open-incidents">—</span>
-                  <span class="dlq-inv-counter-lbl">open</span>
+                  <span class="dlq-inv-counter-num" id="total-incidents">—</span>
+                  <span class="dlq-inv-counter-lbl">active</span>
                 </div>
+                <div id="open-incidents" style="display:none"></div>
                 <div class="dlq-inv-counter dlq-inv-counter--crit">
                   <span class="dlq-inv-counter-num" id="critical-incidents">—</span>
                   <span class="dlq-inv-counter-lbl">critical</span>
@@ -731,6 +680,9 @@
                   <span class="dlq-inv-counter-lbl">affected</span>
                 </div>
               </div>
+              <button class="btn btn-secondary btn-sm" onclick="clearAllFailedEvents()" id="dlq-clear-btn" style="display:none">
+                Clear all
+              </button>
               <button class="btn btn-secondary btn-sm" onclick="loadDLQIntelligence()">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
                 Refresh
@@ -1095,6 +1047,7 @@
         </div><!-- /page-pipeline -->
 
 
+
       </div><!-- /content -->
 
       <!-- ── Detail panel ── -->
@@ -1212,46 +1165,53 @@
 
 <div class="modal-overlay" id="modal-alert">
   <div class="modal">
-    <div class="modal-header"><div class="modal-title">New Alert Channel</div><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-alert')" style="padding:4px 8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+    <div class="modal-header"><div class="modal-title">New Alert</div><button class="btn btn-ghost btn-sm" onclick="closeModal('modal-alert')" style="padding:4px 8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
     <div class="modal-body">
-      <div class="input-group"><label class="input-label">Name</label><input class="input" id="alert-name" placeholder="#ops-alerts"></div>
+      <div class="input-group"><label class="input-label">Name</label><input class="input" id="alert-name" placeholder="e.g. Ops Slack"></div>
       <div class="input-group">
-        <label class="input-label">Channel Type</label>
+        <label class="input-label">Notify via</label>
         <select class="select" id="alert-type" onchange="toggleAlertFields()">
           <option value="slack">Slack</option>
-          <option value="email">Email (SMTP)</option>
+          <option value="email">Email</option>
         </select>
       </div>
       <div id="alert-slack-fields">
-        <div class="input-group"><label class="input-label">Slack Webhook URL</label><input class="input" id="alert-slack-url" placeholder="https://hooks.slack.com/services/…"></div>
+        <div class="input-group"><label class="input-label">Slack incoming webhook URL</label><input class="input" id="alert-slack-url" placeholder="https://hooks.slack.com/services/…"><div style="font-size:11px;color:var(--text3);margin-top:3px">From your Slack app's Incoming Webhooks settings page.</div></div>
       </div>
       <div id="alert-email-fields" style="display:none">
-        <div class="input-group"><label class="input-label">SMTP Host</label><input class="input" id="alert-smtp-host" placeholder="smtp.gmail.com"></div>
-        <div class="input-group"><label class="input-label">SMTP Port</label><input class="input" type="number" id="alert-smtp-port" value="587"></div>
-        <div class="input-group"><label class="input-label">Username</label><input class="input" id="alert-smtp-user"></div>
-        <div class="input-group"><label class="input-label">Password</label><input class="input" type="password" id="alert-smtp-pass"></div>
-        <div class="input-group"><label class="input-label">From</label><input class="input" id="alert-smtp-from"></div>
-        <div class="input-group"><label class="input-label">To</label><input class="input" id="alert-smtp-to"></div>
+        <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end">
+          <div class="input-group" style="margin-bottom:0"><label class="input-label">Mail server</label><input class="input" id="alert-smtp-host" placeholder="smtp.gmail.com"></div>
+          <div class="input-group" style="margin-bottom:0;width:90px"><label class="input-label">Port</label><input class="input" type="number" id="alert-smtp-port" value="587"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+          <div class="input-group" style="margin-bottom:0"><label class="input-label">Username</label><input class="input" id="alert-smtp-user" placeholder="you@gmail.com"></div>
+          <div class="input-group" style="margin-bottom:0"><label class="input-label">Password</label><input class="input" type="password" id="alert-smtp-pass" placeholder="app password"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+          <div class="input-group" style="margin-bottom:0"><label class="input-label">Send from</label><input class="input" id="alert-smtp-from" placeholder="alerts@yourapp.com"></div>
+          <div class="input-group" style="margin-bottom:0"><label class="input-label">Send to</label><input class="input" id="alert-smtp-to" placeholder="oncall@yourapp.com"></div>
+        </div>
       </div>
-      <div style="border-top:1px solid var(--border);margin-top:4px;padding-top:16px">
-        <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:12px">Alert Triggers <span style="font-weight:400;color:var(--text3)">(leave blank to alert on any DLQ event)</span></div>
+      <div style="border-top:1px solid var(--border);margin-top:16px;padding-top:16px">
+        <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:4px">When to notify</div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:12px">Leave both blank to get notified on every delivery failure.</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div class="input-group" style="margin-bottom:0">
-            <label class="input-label">DLQ depth ≥</label>
+            <label class="input-label">Failed events exceed</label>
             <input class="input" type="number" id="alert-dlq-threshold" placeholder="e.g. 10" min="1">
-            <div style="font-size:11px;color:var(--text3);margin-top:3px">Fire when dead letter queue hits this count</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:3px">Total permanently failed deliveries</div>
           </div>
           <div class="input-group" style="margin-bottom:0">
-            <label class="input-label">Success rate &lt;</label>
+            <label class="input-label">Success rate drops below %</label>
             <input class="input" type="number" id="alert-error-threshold" placeholder="e.g. 95" min="0" max="100" step="0.1">
-            <div style="font-size:11px;color:var(--text3);margin-top:3px">Fire when 24h success rate drops below this %</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:3px">24-hour delivery success rate</div>
           </div>
         </div>
       </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal('modal-alert')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveAlert()">Save</button>
+      <button class="btn btn-primary" onclick="saveAlert()">Save alert</button>
     </div>
   </div>
 </div>
@@ -1278,49 +1238,23 @@
 </div>
 
 
-<!-- Simulator Modal -->
-<div class="modal-overlay" id="modal-sim">
-  <div class="modal" style="max-width:480px">
+<!-- Delete Project Confirmation Modal -->
+<div class="modal-overlay" id="modal-delete-project">
+  <div class="modal" style="max-width:440px">
     <div class="modal-header">
-      <div class="modal-title">Send Test Event</div>
-      <button class="btn btn-ghost btn-sm" onclick="closeModal('modal-sim')" style="padding:4px 8px">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
+      <div class="modal-title" style="color:var(--danger)">Delete Project</div>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('modal-delete-project')" style="padding:4px 8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
     </div>
     <div class="modal-body">
+      <div style="font-size:13px;color:var(--text2);margin-bottom:16px">This will permanently delete <strong id="delete-project-name-display" style="color:var(--text)"></strong> and all its webhooks, destinations, and data. <span style="color:var(--danger);font-weight:600">This cannot be undone.</span></div>
       <div class="input-group">
-        <label class="input-label">Destination</label>
-        <select class="select" id="sim-destination"></select>
+        <label class="input-label">Type the project name to confirm</label>
+        <input class="input" id="delete-project-confirm-input" placeholder="" oninput="_checkDeleteConfirm()" style="border-color:var(--danger-dim)">
       </div>
-      <div class="input-group">
-        <label class="input-label">Provider</label>
-        <select class="select" id="sim-provider" onchange="updateSimEventTypes()">
-          <option value="stripe">Stripe</option>
-          <option value="github">GitHub</option>
-          <option value="shopify">Shopify</option>
-        </select>
-      </div>
-      <div class="input-group">
-        <label class="input-label">Event Type</label>
-        <select class="select" id="sim-event-type"></select>
-      </div>
-      <div class="input-group">
-        <label class="input-label">Outcome</label>
-        <select class="select" id="sim-outcome">
-          <option value="real">Real delivery — use destination URL</option>
-          <option value="success">Force success — always 200 ✓</option>
-          <option value="fail">Force fail — always 500, exhausts retries → DLQ</option>
-          <option value="flaky">Flaky — fails first attempt, recovers on second</option>
-        </select>
-      </div>
-      <div id="sim-result" style="display:none;margin-top:12px;padding:10px 12px;background:var(--surface2);border-radius:6px;font-size:12px;font-family:var(--mono);color:var(--text2);word-break:break-all"></div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="closeModal('modal-sim')">Cancel</button>
-      <button class="btn btn-primary" id="sim-send-btn" onclick="runSimulate()">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-        Send
-      </button>
+      <button class="btn btn-secondary" onclick="closeModal('modal-delete-project')">Cancel</button>
+      <button class="btn btn-danger" id="delete-project-submit-btn" disabled onclick="_executeDeleteProject()">Delete Project</button>
     </div>
   </div>
 </div>
@@ -1339,5 +1273,6 @@
 </div>
 
 <script src="app.js"></script>
+<script src="demo-journey.js"></script>
 </body>
 </html>

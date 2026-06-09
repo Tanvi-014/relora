@@ -3,7 +3,8 @@ import re
 import uuid
 from typing import Any, Dict, Optional
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException
+from fastapi import status
 
 
 FILTER_RE = re.compile(
@@ -64,10 +65,7 @@ def event_matches_filter(payload: Any, filter_expression: Optional[str]) -> bool
 
     match = FILTER_RE.match(filter_expression)
     if not match:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Filter must be like: event.type == 'payment.succeeded'",
-        )
+        raise ValueError("Filter must be like: event.type == 'payment.succeeded'")
 
     path, op_str, expected = match.groups()
     actual = get_path(payload, path)

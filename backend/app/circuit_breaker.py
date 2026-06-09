@@ -60,7 +60,20 @@ async def should_deliver(db: AsyncSession, destination_id: UUID) -> bool:
         return True
     if state == "open":
         if dest.circuit_next_retry_at and datetime.now(timezone.utc) >= dest.circuit_next_retry_at:
-            await _set_state(db, destination_id, "half_open")
+            # CAS: atomically transition open → half_open so that only one writer
+            # wins; any worker that reads 'open' with an elapsed timer can deliver
+            # (the circuit is transitioning regardless of who wins the write).
+            await db.execute(
+                text("""
+                UPDATE destinations SET circuit_state = 'half_open',
+                  circuit_failure_count = :stc, updated_at = NOW()
+                WHERE id = :id
+                  AND circuit_state = 'open'
+                  AND circuit_next_retry_at <= NOW()
+                """),
+                {"id": destination_id, "stc": SUCCESS_TO_CLOSE},
+            )
+            await db.commit()
             return True
         return False
     # half_open: let probe requests through

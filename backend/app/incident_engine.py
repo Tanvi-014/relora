@@ -313,20 +313,27 @@ class IncidentEngine:
         Returns:
             List of dicts with root cause information
         """
-        # Group by failure category and subcategory
+        # Only count delivery attempts whose parent webhook is still failed
         query = select(
             DeliveryAttempt.failure_category,
             DeliveryAttempt.failure_subcategory,
             func.count(DeliveryAttempt.id).label("count"),
+        ).join(
+            Webhook, DeliveryAttempt.webhook_id == Webhook.id
         ).where(
-            DeliveryAttempt.failure_category.isnot(None)
+            DeliveryAttempt.failure_category.isnot(None),
+            Webhook.status == "failed",
+            Webhook.is_simulation == False,  # noqa: E712
         ).group_by(
             DeliveryAttempt.failure_category,
             DeliveryAttempt.failure_subcategory,
         ).order_by(
             func.count(DeliveryAttempt.id).desc()
         )
-        
+
+        if project_id:
+            query = query.where(Webhook.project_id == project_id)
+
         result = await db.execute(query)
         rows = result.all()
         

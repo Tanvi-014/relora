@@ -1,4 +1,5 @@
 import ipaddress
+import socket
 from urllib.parse import urlparse
 
 from fastapi import HTTPException, Request, status
@@ -61,6 +62,22 @@ def validate_destination_url(url: str) -> str:
     try:
         ip = ipaddress.ip_address(hostname)
     except ValueError:
+        # Hostname — resolve and check every returned address for private ranges.
+        # This closes the DNS-rebinding / CNAME-to-internal-IP SSRF vector.
+        try:
+            addrinfos = socket.getaddrinfo(hostname, None)
+        except socket.gaierror:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Destination hostname could not be resolved",
+            )
+        for addrinfo in addrinfos:
+            resolved = ipaddress.ip_address(addrinfo[4][0])
+            if resolved.is_private or resolved.is_loopback or resolved.is_link_local or resolved.is_reserved:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Destination hostname resolves to a private IP address",
+                )
         return url
 
     if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:

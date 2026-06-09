@@ -94,6 +94,35 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+async def _recover_stuck_webhooks() -> None:
+    """
+    Reset webhooks stuck in 'processing' back to 'pending' so they will be retried.
+
+    A webhook is considered stuck when it has been 'processing' for longer than
+    10 minutes — well above the maximum possible delivery time
+    (HTTP_CLIENT_TIMEOUT_SECONDS default 10s + DB overhead + 5× retry headroom).
+    This covers worker crashes, OOM kills, and ungraceful pod evictions.
+    """
+    from app.db import async_session as _s
+    async with _s() as db:
+        result = await db.execute(
+            text("""
+            UPDATE webhooks
+            SET status = 'pending',
+                updated_at = NOW()
+            WHERE status = 'processing'
+              AND updated_at < NOW() - INTERVAL '10 minutes'
+            """)
+        )
+        await db.commit()
+        if result.rowcount:
+            logger.warning(
+                "Recovered %d stuck webhooks on startup (processing → pending)",
+                result.rowcount,
+                extra={"event": "webhook.stuck.recovered", "count": result.rowcount},
+            )
+
+
 async def _recover_stuck_replay_jobs() -> None:
     """Reset replay jobs stuck in 'running' at startup (process crashed mid-replay)."""
     from app.db import async_session as _s
@@ -124,6 +153,7 @@ async def lifespan(app: FastAPI):
         logger.info("AUTO_CREATE_TABLES=true, initializing tables...")
         await init_db()
 
+    await _recover_stuck_webhooks()
     await _recover_stuck_replay_jobs()
 
     logger.info("Starting incident scheduler...")

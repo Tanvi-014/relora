@@ -54,6 +54,10 @@ async def check_rate_limit(
             """),
             {"key": bucket_key, "max_tokens": max_tokens, "refill_rate": refill_rate},
         )
+        # This commit is intentional and load-bearing: it persists the token spend
+        # before ingest_webhook writes webhook rows, so a rolled-back webhook insert
+        # cannot also roll back the rate-limit deduction and bypass the limiter.
+        # Do NOT merge this into the caller's transaction or reorder it after the webhook insert.
         await db.commit()
         row = result.fetchone()
         if row is None:
