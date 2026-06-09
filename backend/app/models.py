@@ -678,7 +678,7 @@ class WeeklyInsightReport(Base):
     __tablename__ = "weekly_insight_reports"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(String, nullable=False, index=True)   # project api_key
+    tenant_id = Column(String, nullable=False)
     week_start = Column(DateTime(timezone=True), nullable=False)
     week_end = Column(DateTime(timezone=True), nullable=False)
     grade = Column(String(4), nullable=False)
