@@ -3339,3 +3339,103 @@ tbody tr {
   transition: color 0.15s;
 }
 .setup-strip-dismiss:hover { color: var(--text2, #a1a1aa); }
+
+/* ============================================================================
+   GUIDED TOUR STYLES
+   ============================================================================ */
+
+.tour-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 9998;
+  pointer-events: none;
+}
+
+.tour-overlay canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.tour-popover {
+  position: fixed;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 8px rgba(0, 0, 0, 0.1);
+  z-index: 9999;
+  width: 320px;
+  padding: 16px;
+  font-size: 14px;
+  line-height: 1.5;
+  max-height: 90vh;
+  overflow-y: auto;
+  animation: tour-popover-in 0.2s ease-out;
+}
+
+@keyframes tour-popover-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.tour-head {
+  margin-bottom: 12px;
+  font-weight: 600;
+  color: var(--text);
+  font-size: 15px;
+}
+
+.tour-body {
+  margin-bottom: 16px;
+  color: var(--text2);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.tour-body p {
+  margin: 0;
+}
+
+.tour-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  flex-wrap: wrap;
+}
+
+.tour-counter {
+  font-size: 11px;
+  color: var(--text3);
+  font-family: var(--mono);
+  flex: 1;
+  text-align: center;
+  margin: 0 4px;
+}
+
+.tour-close {
+  background: none;
+  border: none;
+  color: var(--text3);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: color 0.15s;
+  margin-left: auto;
+}
+
+.tour-close:hover {
+  color: var(--text);
+}

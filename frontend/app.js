@@ -24,6 +24,7 @@ const feedEvents = [];
 const FEED_MAX = 50;
 let _pendingQueue = 0;
 let _editingDestId = null;
+let _setupGuideDismissed = false;
 
 // Mission control state — shared between loadDashboard and loadSystemStatus
 let _mcWorkerOk = true;
@@ -61,6 +62,8 @@ async function boot() {
       history.replaceState({}, '', '/app.html');
       setTimeout(() => toast('Welcome to Relora! Follow the setup steps above to go live.', 'success'), 800);
     }
+    // Start event-driven onboarding checklist
+    _startOnboardingPolling();
     // Tick the banner so "last delivery Xs ago" stays accurate
     setInterval(_renderMCBanner, 15000);
     // Background DLQ poll — runs on every page, keeps indicators current
@@ -92,8 +95,7 @@ async function _pollDLQState() {
 }
 
 function _updateDLQIndicators(depth) {
-  // Tab title — prepend warning ping when DLQ is non-empty
-  document.title = depth > 0 ? `[⚠ ${depth}] Relora` : 'Relora';
+  document.title = 'Relora';
 
   // Nav badge on the DLQ nav item
   const badge = document.getElementById('dlq-nav-badge');
@@ -129,7 +131,13 @@ async function apiFetch(path, opts = {}) {
   if (res.status === 401) { window.location.href = '/login.html'; throw new Error('401'); }
   if (!res.ok) {
     let detail = `HTTP ${res.status}`;
-    try { const j = await res.json(); detail = j.detail || detail; } catch {}
+    try {
+      const j = await res.json();
+      if (typeof j.detail === 'string') detail = j.detail;
+      else if (Array.isArray(j.detail)) detail = j.detail.map(d => d.msg || JSON.stringify(d)).join('; ');
+      else if (j.detail != null) detail = JSON.stringify(j.detail);
+      else if (typeof j.message === 'string') detail = j.message;
+    } catch {}
     throw new Error(detail);
   }
   if (res.status === 204) return null;
@@ -376,7 +384,11 @@ function refreshAuditTab() {
 }
 
 function navTo(page) {
-  // Timeline is now inside Audit
+  // Merged-page redirects — removed sidebar items route to their parent page + tab
+  if (page === 'alerts')    { navTo('recovery'); switchRecoveryTab('alert-settings'); return; }
+  if (page === 'analytics') { navTo('insights'); switchInsightTab('trends'); return; }
+
+  // Timeline is inside Audit
   if (page === 'timeline') { navTo('audit'); switchAuditTab('timeline'); return; }
 
   // Stop pipeline auto-refresh when leaving that page
@@ -388,7 +400,12 @@ function navTo(page) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   const pageEl = document.getElementById('page-' + page);
-  const navEl = document.querySelector(`.nav-item[data-page="${page}"]`);
+
+  // Sub-pages not in sidebar: highlight their parent nav item instead
+  const _navParent = { 'dlq-intelligence': 'recovery', 'replay': 'recovery', 'pipeline': 'webhooks' };
+  const navPage = _navParent[page] || page;
+  const navEl = document.querySelector(`.nav-item[data-page="${navPage}"]`);
+
   if (pageEl) pageEl.classList.add('active');
   if (navEl) navEl.classList.add('active');
 
@@ -403,14 +420,16 @@ function navTo(page) {
     }
   }
 
+  if (localStorage.getItem('relora_onboarding_dismissed') !== '1' && _obsStep() !== 'done') {
+    _renderSuggestionBar();
+  }
+
   // Lazy-load page data
-  if (page === 'overview') { loadDashboard(); }
+  if (page === 'overview') { _setupGuideDismissed = false; loadDashboard(); }
   if (page === 'webhooks') loadWebhooks(1);
   if (page === 'destinations') loadDestinations();
-  if (page === 'alerts') loadAlerts();
   if (page === 'team') loadTeam();
   if (page === 'replay') initReplay();
-  if (page === 'analytics') loadAnalytics();
   if (page === 'dlq-intelligence') { loadDLQIntelligence(); }
   if (page === 'schema-drift') { loadSchemaDrift(); }
   if (page === 'audit') { switchAuditTab(_auditTab); }
@@ -777,151 +796,91 @@ function _sysPill(cls, label) {
 }
 
 // ---------------------------------------------------------------------------
-// First-time suggestion bar — persistent cross-page onboarding guide
+// Event-driven onboarding checklist
+// All steps are derived from real product state
 // ---------------------------------------------------------------------------
-async function _renderSuggestionBar() {
-  const bar = document.getElementById('suggestion-bar');
-  if (!bar) return;
-  await _loadAlertCount();
+let _onboardingProgress = null;
+let _onboardingPollTimer = null;
 
-  const hasDest     = destinations.length > 0;
-  const hasActivity = (_mcKpis?.deliveries_today ?? 0) > 0;
-  const hasAlerts   = (_alertCount ?? 0) > 0;
-
-  if (hasDest && hasActivity && hasAlerts) { bar.style.display = 'none'; return; }
-
-  let stepLabel, text, ctaLabel, ctaFn, dismissKey;
-  if (!hasDest) {
-    stepLabel = 'Step 1 of 3'; dismissKey = 'relora_sug_s1';
-    text = 'Add your first destination — tell Relora where to forward incoming webhooks.';
-    ctaLabel = 'Go to Destinations';
-    ctaFn = "navTo('destinations')";
-  } else if (!hasActivity) {
-    stepLabel = 'Step 2 of 3'; dismissKey = 'relora_sug_s2';
-    text = 'Send your first event — point a webhook source at your ingest URL and watch it flow through.';
-    ctaLabel = 'View setup';
-    ctaFn = "navTo('overview')";
-  } else {
-    stepLabel = 'Step 3 of 3'; dismissKey = 'relora_sug_s3';
-    text = 'Set up failure alerts — get notified the moment a delivery fails, before your customers do.';
-    ctaLabel = 'Set up Alerts';
-    ctaFn = "navTo('alerts');setTimeout(openAlertModal,100)";
+async function _loadOnboardingProgress() {
+  try {
+    const prev = _onboardingProgress;
+    _onboardingProgress = await apiFetch('/onboarding/progress');
+    // Auto-start demo when user creates their first destination
+    if (
+      prev &&
+      !prev.steps[0].completed &&
+      _onboardingProgress.steps[0].completed &&
+      localStorage.getItem('relora_demo_journey_completed_v1') !== '1' &&
+      typeof reloraDemoRead === 'function' && !reloraDemoRead().startedAt
+    ) {
+      fireDemoEvent();
+    }
+    _renderOnboardingSection();
+    // Re-render banner whenever step state changes
+    const changed = !prev ||
+      prev.activated !== _onboardingProgress.activated ||
+      prev.steps.some((s, i) => s.completed !== _onboardingProgress.steps[i]?.completed);
+    if (changed) _renderMCBanner();
+    if (_onboardingProgress.activated) _stopOnboardingPolling();
+  } catch {
+    // Silently fail — onboarding not critical
   }
-
-  if (localStorage.getItem(dismissKey) === '1') { bar.style.display = 'none'; return; }
-
-  bar.style.display = 'flex';
-  bar.innerHTML = `
-    <span class="sb-badge">${esc(stepLabel)}</span>
-    <span class="sb-text">${esc(text)}</span>
-    <div class="sb-actions">
-      <button class="btn btn-primary btn-sm sb-cta" onclick="${ctaFn}">${esc(ctaLabel)} →</button>
-      <button class="sb-dismiss" onclick="_dismissSuggBar('${dismissKey}')" title="Dismiss">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
-    </div>`;
 }
 
-function _dismissSuggBar(key) {
-  localStorage.setItem(key, '1');
-  const bar = document.getElementById('suggestion-bar');
-  if (bar) bar.style.display = 'none';
+function _startOnboardingPolling() {
+  // Initial load
+  _loadOnboardingProgress();
+  // Poll every 2s for real-time updates
+  if (_onboardingPollTimer) clearInterval(_onboardingPollTimer);
+  _onboardingPollTimer = setInterval(_loadOnboardingProgress, 2000);
 }
 
-async function _renderOnboardingSection() {
-  await _loadAlertCount();
+function _stopOnboardingPolling() {
+  if (_onboardingPollTimer) {
+    clearInterval(_onboardingPollTimer);
+    _onboardingPollTimer = null;
+  }
+}
+
+function _renderOnboardingSection() {
   const section = document.getElementById('onboarding-section');
-  if (!section) return;
-  if (section.classList.contains('obs-celebrate')) return;
-  if (section.classList.contains('demo-journey')) return;
-
-  const hasDest     = destinations.length > 0;
-  // Only count real deliveries from the dashboard API — feedEvents includes
-  // test/simulated events which would falsely advance the onboarding step.
-  const hasActivity = (_mcKpis?.deliveries_today ?? 0) > 0;
-  const hasAlerts   = (_alertCount ?? 0) > 0;
-  const dismissed   = localStorage.getItem('relora_onboarding_dismissed') === '1';
-
-  if ((hasDest && hasActivity && hasAlerts) || dismissed) {
-    section.style.display = 'none';
-    return;
-  }
-
-  // Deduplicate re-renders: skip if the meaningful state hasn't changed.
-  // This prevents WS-triggered loadDashboard calls from flickering the card.
-  const stateKey = `${+hasDest}|${+hasActivity}|${+hasAlerts}`;
-  if (section.dataset.obsState === stateKey) return;
-  section.dataset.obsState = stateKey;
-
-  section.style.display = '';
-
-  const steps = [
-    { label: 'Add destination', done: hasDest },
-    { label: 'Send events',     done: hasActivity },
-    { label: 'Set up alerts',   done: hasAlerts },
-  ];
-  const doneCount  = steps.filter(s => s.done).length;
-  const activeIdx  = steps.findIndex(s => !s.done);
-
-  const stepsHtml = steps.map((s, i) => {
-    const state = s.done ? 'done' : i === activeIdx ? 'active' : 'pending';
-    const icon  = s.done
-      ? `<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><polyline points="20 6 9 17 4 12"/></svg>`
-      : `<span class="obs-step-num">${i + 1}</span>`;
-    return (i > 0 ? '<span class="obs-step-arr">→</span>' : '') +
-      `<span class="obs-step obs-step--${state}">${icon} ${esc(s.label)}</span>`;
-  }).join('');
-
-  let title, desc, actionsHtml;
-
-  if (!hasDest) {
-    title = 'Choose where events go';
-    desc  = 'Add your app\'s endpoint — Relora will forward every incoming webhook to it, with automatic retries and delivery tracking.';
-    actionsHtml = `<button class="btn btn-primary btn-sm" onclick="openDestModal()">Add destination</button>`;
-  } else if (!hasActivity) {
-    const ingestUrl = `${window.location.origin}/api/v1/ingest`;
-    const apiKey    = currentProject?.api_key || 'YOUR_API_KEY';
-    const cmd       = `curl -X POST ${ingestUrl} \\\n  -H "X-Relora-API-Key: ${apiKey}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"event_type":"test.event","data":{"hello":"world"}}'`;
-    title = 'Send events into Relora';
-    desc  = 'Point Stripe, GitHub, Shopify, or your app at your ingest URL. Every event that arrives gets routed to your destination automatically.';
-    actionsHtml = `
-      <div class="obs-url-row">
-        <input class="input obs-url-input" id="obs-ingest-url" readonly value="${esc(ingestUrl)}" onclick="this.select()">
-        <button class="btn btn-secondary btn-sm" onclick="navigator.clipboard.writeText(document.getElementById('obs-ingest-url').value).then(()=>toast('Endpoint URL copied','success'))">Copy URL</button>
-      </div>
-      <div class="obs-curl-row">
-        <pre class="obs-curl">${esc(cmd)}</pre>
-        <button class="btn btn-ghost btn-xs obs-curl-copy" onclick="_nraCopyCmd(${JSON.stringify(cmd)})">Copy</button>
-      </div>
-      <div class="obs-alt">Need help? <a class="obs-link" href="/docs.html" target="_blank">Read the quick-start guide →</a></div>`;
-  } else {
-    title = 'Know when something breaks';
-    desc  = 'Get notified the moment deliveries fail — before your customers notice. Connect Slack or email in under a minute.';
-    actionsHtml = `
-      <button class="btn btn-primary btn-sm" onclick="navTo('alerts');setTimeout(openAlertModal,100)">Set up an alert</button>
-      <button class="btn btn-ghost btn-sm" onclick="_dismissOnboarding()">Not now</button>`;
-  }
-
-  section.innerHTML = `
-    <div class="obs-header">
-      <span class="obs-eyebrow">Setup progress</span>
-      <div class="obs-steps-row">${stepsHtml}</div>
-      <span class="obs-count">${doneCount} / ${steps.length} complete</span>
-    </div>
-    <div class="obs-body">
-      <div class="obs-title">${esc(title)}</div>
-      <div class="obs-desc">${esc(desc)}</div>
-      <div class="obs-actions">${actionsHtml}</div>
-    </div>`;
+  if (section) section.style.display = 'none';
 }
 
-function _dismissOnboarding() {
-  localStorage.setItem('relora_onboarding_dismissed', '1');
+function _hideObsCard() {
   const section = document.getElementById('onboarding-section');
-  if (section) {
-    section.style.display = 'none';
-    delete section.dataset.obsState;
+  if (section) section.style.display = 'none';
+}
+
+function _dismissSetupGuide() {
+  _setupGuideDismissed = true;
+  const section = document.getElementById('onboarding-section');
+  if (section) section.style.display = 'none';
+}
+
+async function fireDemoEvent() {
+  const btn = document.getElementById('obs-demo-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="obs-spinner"></span> Sending…'; }
+  try {
+    await apiFetch('/onboarding/send-demo', { method: 'POST' });
+    if (typeof reloraDemoStart === 'function') reloraDemoStart({ force: false });
+    toast('Demo event sent! The checklist will update automatically as the demo progresses.', 'success');
+    setTimeout(_loadOnboardingProgress, 1000);
+  } catch (e) {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg> Send demo event';
+    }
+    toast(e.message || 'Failed to send demo event', 'error');
   }
+}
+
+// Legacy: for backward compatibility only
+function _renderSuggestionBar() {}
+function _dismissSuggBar() {}
+function _obsStep() {
+  return destinations.some(d => !d.is_sandbox) ? 'done' : 'active';
 }
 
 
@@ -943,33 +902,12 @@ function _nraCopyCmd(cmd) {
 }
 
 function _triggerFirstDeliveryCelebration(event) {
+  const dest = destinations.find(d => d.id === event.destination_id);
+  if (dest?.is_sandbox) return;
   if (localStorage.getItem('relora_first_celebrated') === '1') return;
-  const section = document.getElementById('onboarding-section');
-  if (!section) return;
-  if (section.classList.contains('demo-journey')) return;
   localStorage.setItem('relora_first_celebrated', '1');
-  // Stamp obsState so the next _renderOnboardingSection call (from WS-triggered
-  // loadDashboard) doesn't overwrite this celebration card.
-  section.dataset.obsState = 'celebrate';
-  section.className = 'obs-card obs-celebrate';
-  section.style.display = '';
-  // Demo event is no longer needed now that a real webhook delivered.
-  _updateDemoBtn();
-  const dest      = destinations.find(d => d.id === event.destination_id);
-  const destName  = dest?.name || _shortUrl(event.destination_url || '');
-  const eventLabel = event.event_id || 'webhook';
-  section.innerHTML = `
-    <div class="obs-celebrate-inner">
-      <div class="obs-celebrate-icon">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-      </div>
-      <div class="obs-celebrate-title">First webhook delivered</div>
-      <div class="obs-celebrate-meta">${esc(eventLabel)} → ${esc(destName)}</div>
-      <div class="obs-celebrate-actions">
-        <button class="btn btn-primary btn-sm" onclick="navTo('alerts');setTimeout(openAlertModal,100)">Set up alerts →</button>
-        <button class="btn btn-ghost btn-sm" onclick="_dismissOnboarding()">Dismiss</button>
-      </div>
-    </div>`;
+  const name = dest?.name || _shortUrl(event.destination_url || '');
+  toast(`First delivery confirmed → ${name}`, 'success');
 }
 
 function _renderHealthSplit(split) {
@@ -1437,7 +1375,6 @@ function _renderFeed(newEventAtTop) {
   if (!feedEvents.length) {
     const hasDest = destinations.length > 0;
     if (!hasDest) {
-      // Step 1 guidance — no destination yet
       body.innerHTML = `
         <div style="display:flex;flex-direction:column;align-items:center;text-align:center;padding:32px 24px;gap:14px">
           <div style="width:44px;height:44px;border-radius:50%;background:rgba(0,212,126,.08);border:1px solid rgba(0,212,126,.2);display:flex;align-items:center;justify-content:center;color:#00D47E;flex-shrink:0">
@@ -1447,14 +1384,13 @@ function _renderFeed(newEventAtTop) {
             <div style="font-size:13.5px;font-weight:600;color:var(--text);margin-bottom:5px">Add a destination first</div>
             <div style="font-size:12px;color:var(--text3);line-height:1.6;max-width:220px">Tell Relora where to forward events — your app's URL, a webhook endpoint, anywhere.</div>
           </div>
-          <button class="btn btn-primary btn-sm" onclick="openDestModal()" style="gap:6px">
+          <button class="btn btn-primary btn-sm" onclick="openDestWizard()" style="gap:6px">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
             Add destination
           </button>
           <a class="btn btn-ghost btn-sm" href="/index.html" target="_blank" style="font-size:11px;color:var(--text3)">Watch the demo →</a>
         </div>`;
     } else {
-      // Step 2 guidance — destination exists, waiting for first event
       const ingestUrl = window.location.origin + '/api/v1/ingest';
       const apiKey = currentProject?.api_key || 'YOUR_API_KEY';
       body.innerHTML = `
@@ -1620,7 +1556,6 @@ function _syncFeedFromDashboard(failures, incidents, recentActivity) {
     newEvents.push({ cls: 'warn', msg: 'Incident open · ' + cat, dest: i.destination_name || '', ts: i.last_seen_at, _id: key });
   });
 
-  if (!newEvents.length) return;
   const merged = [...newEvents, ...feedEvents];
   merged.sort((a, b) => new Date(b.ts) - new Date(a.ts));
   feedEvents.length = 0;
@@ -1701,15 +1636,47 @@ function _renderKPIStrip(kpis, incidents, recentFailures) {
   } else {
     setKpi('mc-kpi-dests', '0', '', 'mc-kpi-cell-dests', false);
   }
+
+  // Hide the strip when there's no activity — dashes/zeros convey nothing useful
+  const strip = document.querySelector('.mc-kpi-strip');
+  if (strip) strip.style.display = noActivity ? 'none' : '';
 }
 
 function _renderMCBanner() {
-  const dot    = document.getElementById('mc-signal-dot');
-  const text   = document.getElementById('mc-signal-text');
-  const meta   = document.getElementById('mc-banner-meta');
   const banner = document.getElementById('mc-banner');
-  if (!dot || !text || !meta || !banner) return;
+  if (!banner) return;
 
+  const refreshBtn = `<div class="mc-banner-right">
+    <button class="mc-btn-bare" onclick="loadDashboard()">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
+      refresh
+    </button>
+  </div>`;
+
+  // ── Setup mode: replace banner with horizontal 3-step progress strip ──────
+  if (_onboardingProgress && !_onboardingProgress.activated) {
+    const steps = _onboardingProgress.steps;
+    const currentStep = steps.find(s => !s.completed);
+
+    const checkSvg = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+
+    const pills = steps.map((s, i) => {
+      if (s.completed) {
+        return `<div class="mc-ob-step mc-ob-step--done">${checkSvg}<span>${esc(s.title)}</span></div>`;
+      }
+      const active = currentStep && s.id === currentStep.id;
+      const cta = active ? _obStepCTA(s.id) : '';
+      const cls = active ? 'mc-ob-step--active' : 'mc-ob-step--pending';
+      return `<div class="mc-ob-step ${cls}"><span class="mc-ob-num">${i + 1}</span><span>${esc(s.title)}</span>${cta}</div>`;
+    });
+
+    const strip = pills.map((p, i) => i === 0 ? p : `<span class="mc-ob-arr">→</span>${p}`).join('');
+    banner.className = 'mc-banner mc-banner--setup';
+    banner.innerHTML = `<div class="mc-ob-strip">${strip}</div>${refreshBtn}`;
+    return;
+  }
+
+  // ── Operational mode ──────────────────────────────────────────────────────
   const kpis            = _mcKpis || {};
   const status          = _mcSystemStatus || 'healthy';
   const dlq             = kpis.dlq_depth ?? 0;
@@ -1732,18 +1699,11 @@ function _renderMCBanner() {
         ? `${dlq} event${dlq !== 1 ? 's' : ''} in dead letter queue`
         : 'System degraded';
   } else {
-    level    = 'ok';
+    level = 'ok';
     mainText = destinations.length > 0 ? 'All systems operational' : 'Ready to route events';
   }
 
-  dot.className    = 'mc-signal-dot ' + level;
-  text.className   = 'mc-signal-text text-' + level;
-  text.textContent = mainText;
-  banner.className = 'mc-banner banner-' + level;
-
   const metaParts = [];
-
-  // Most alive piece: last delivery with seconds precision
   if (lastDelivery) {
     const secs = Math.floor((Date.now() - new Date(lastDelivery)) / 1000);
     const lastStr = secs < 60 ? `${secs}s ago` : relTime(lastDelivery);
@@ -1751,18 +1711,12 @@ function _renderMCBanner() {
   } else if (destinations.length > 0) {
     metaParts.push(`<span class="mc-meta-item mc-meta-muted">No deliveries yet</span>`);
   }
-
-  // Deliveries today — gives the system a heartbeat
   if (deliveriesToday > 0) {
     metaParts.push(`<span class="mc-meta-item">${deliveriesToday.toLocaleString()} delivered today</span>`);
   }
-
-  // Worker — only surface when something is wrong
   if (!_mcWorkerOk) {
     metaParts.push(`<span class="mc-meta-item meta-crit">worker offline</span>`);
   }
-
-  // Destinations — only surface degraded count
   if (destinations.length > 0) {
     const healthyDests = destinations.filter(d => d.circuit_state === 'closed' && d.is_enabled !== false).length;
     if (healthyDests < destinations.length) {
@@ -1770,13 +1724,24 @@ function _renderMCBanner() {
       metaParts.push(`<span class="mc-meta-item meta-warn">${n} destination${n > 1 ? 's' : ''} degraded</span>`);
     }
   }
-
-  // Queue pressure — only when backed up
   if (_mcPending > 50) {
     metaParts.push(`<span class="mc-meta-item meta-warn">${_mcPending.toLocaleString()} pending</span>`);
   }
 
-  meta.innerHTML = metaParts.join('');
+  banner.className = 'mc-banner banner-' + level;
+  banner.innerHTML = `
+    <div class="mc-banner-signal">
+      <div class="mc-signal-dot ${level}" id="mc-signal-dot"></div>
+      <span class="mc-signal-text text-${level}" id="mc-signal-text">${esc(mainText)}</span>
+    </div>
+    <div class="mc-banner-meta" id="mc-banner-meta">${metaParts.join('')}</div>
+    ${refreshBtn}`;
+}
+
+function _obStepCTA(stepId) {
+  if (stepId === 1) return `<button class="mc-ob-cta" onclick="openDestWizard()">Add Destination →</button>`;
+  if (stepId === 2) return '';
+  return '';
 }
 
 function _renderMCTriage(kpis, incidents, sloBreaches, schemaDrift) {
@@ -1896,7 +1861,7 @@ function _renderMCDestinations() {
     el.innerHTML = `
       <div style="padding:14px 14px 12px;display:flex;flex-direction:column;gap:10px">
         <div style="font-size:12px;color:var(--text3);line-height:1.55">Where should Relora send your events? Add an endpoint and deliveries start immediately.</div>
-        <button class="btn btn-primary btn-sm" style="width:100%;justify-content:center;gap:6px" onclick="openDestModal()">
+        <button class="btn btn-primary btn-sm" style="width:100%;justify-content:center;gap:6px" onclick="openDestWizard()">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
           Add destination
         </button>
@@ -2102,6 +2067,9 @@ async function replaySelected() {
 async function loadDestinations() {
   try {
     destinations = await apiFetch('/destinations');
+    window._reloraHasRealDestinations = destinations.some(
+      d => d.is_sandbox !== true && !d.url?.includes('/api/v1/sandbox/inbox')
+    );
     renderDestTable();
     populateDestSelects();
     _loadDestRates();
@@ -2155,10 +2123,13 @@ function renderDestTable() {
 
   tbody.innerHTML = destinations.map(d => {
     const isOpen = d.circuit_state === 'open' || d.circuit_state === 'half_open';
+    const sandboxBadge = d.is_sandbox
+      ? `<span class="dest-sandbox-badge" title="Auto-created sandbox for onboarding">Sandbox</span>`
+      : '';
     return `
     <tr>
       <td><span class="dest-status-dot ${statusClass(d)}">${statusLabel(d)}</span></td>
-      <td style="font-weight:500;color:var(--text)">${esc(d.name)}</td>
+      <td style="font-weight:500;color:var(--text)">${esc(d.name)}${sandboxBadge}</td>
       <td class="cell-url" title="${esc(d.url)}">${esc(d.url)}</td>
       <td style="font-family:var(--mono);font-size:12px">0 / ${d.max_retries}</td>
       <td>
@@ -2205,21 +2176,113 @@ function populateDestSelects() {
   });
 }
 
-function openDestModal(existing = null) {
+function openDestModal(existing = null, prefill = null) {
   _editingDestId = existing?.id || null;
-  document.getElementById('dest-name').value = existing?.name || '';
-  document.getElementById('dest-url').value = existing?.url || '';
+  document.getElementById('dest-name').value = existing?.name || prefill?.name || '';
+  document.getElementById('dest-url').value = existing?.url || prefill?.url || '';
   document.getElementById('dest-max-retries').value = existing?.max_retries ?? 5;
   document.getElementById('dest-backoff').value = existing?.backoff_base_seconds ?? 30;
-  document.getElementById('dest-filter').value = existing?.filter_expression || '';
+  const destFilterEl = document.getElementById('dest-filter');
+  const destFilterClear = document.getElementById('dest-filter-clear');
+  destFilterEl.value = existing?.filter_expression || '';
+  if (destFilterClear) destFilterClear.style.display = existing?.filter_expression ? '' : 'none';
+  destFilterEl.oninput = () => { if (destFilterClear) destFilterClear.style.display = destFilterEl.value ? '' : 'none'; };
   document.getElementById('dest-ordering-key').value = existing?.ordering_key_field || '';
   document.getElementById('dest-secret').value = '';
   document.getElementById('dest-transform-type').value = existing?.transform_type || 'none';
   document.getElementById('dest-transform-map').value = existing?.transform_map ? JSON.stringify(existing.transform_map, null, 2) : '';
   document.getElementById('dest-transform-code').value = existing?.transform_code || '';
   document.getElementById('dest-modal-title').textContent = existing ? 'Edit Destination' : 'New Destination';
+  _checkDestUrl(document.getElementById('dest-url').value);
   toggleTransformEditor();
   openModal('modal-dest');
+}
+
+// ---------------------------------------------------------------------------
+// Destination type wizard — shown before the destination form for new users
+// ---------------------------------------------------------------------------
+function openDestWizard() {
+  let overlay = document.getElementById('dest-wizard-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'dest-wizard-overlay';
+    overlay.className = 'dest-wizard-overlay';
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.style.display = 'none'; });
+    document.body.appendChild(overlay);
+  }
+  overlay.style.display = 'flex';
+  overlay.innerHTML = `
+    <div class="dest-wizard-box">
+      <div class="dest-wizard-header">
+        <span class="dest-wizard-title">What are you trying to do?</span>
+        <button class="dest-wizard-close" onclick="document.getElementById('dest-wizard-overlay').style.display='none'">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="dest-wizard-grid">
+        <button class="dest-wizard-opt" onclick="_pickDestType('try')">
+          <div class="dest-wizard-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          </div>
+          <div class="dest-wizard-label">Just trying Relora</div>
+          <div class="dest-wizard-hint">Send events to a temporary test URL</div>
+        </button>
+        <button class="dest-wizard-opt" onclick="_pickDestType('app')">
+          <div class="dest-wizard-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+          </div>
+          <div class="dest-wizard-label">I have an application</div>
+          <div class="dest-wizard-hint">Forward events to my backend API</div>
+        </button>
+        <button class="dest-wizard-opt" onclick="_pickDestType('local')">
+          <div class="dest-wizard-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </div>
+          <div class="dest-wizard-label">Local development</div>
+          <div class="dest-wizard-hint">Forward events to localhost while coding</div>
+        </button>
+        <button class="dest-wizard-opt" onclick="_pickDestType('custom')">
+          <div class="dest-wizard-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+          </div>
+          <div class="dest-wizard-label">Custom URL</div>
+          <div class="dest-wizard-hint">I already have a destination in mind</div>
+        </button>
+      </div>
+    </div>`;
+}
+
+function _pickDestType(type) {
+  const overlay = document.getElementById('dest-wizard-overlay');
+  if (overlay) overlay.style.display = 'none';
+  const prefills = {
+    try:    { name: 'Test Destination', url: 'https://webhook.site/' },
+    app:    { name: 'My Application',   url: 'https://' },
+    local:  { name: 'Local Dev',        url: 'http://host.docker.internal:3001/webhook' },
+    custom: { name: '',                 url: '' },
+  };
+  openDestModal(null, prefills[type] || prefills.custom);
+}
+
+function _checkDestUrl(val) {
+  const warn = document.getElementById('dest-url-warn');
+  const suggest = document.getElementById('dest-url-suggest');
+  if (!warn) return;
+  const localhostMatch = val.match(/^(https?:\/\/)(localhost)(:\d+)/i);
+  if (localhostMatch) {
+    const fixed = val.replace(/localhost/, 'host.docker.internal');
+    if (suggest) suggest.textContent = fixed;
+    warn.style.display = '';
+  } else {
+    warn.style.display = 'none';
+  }
+}
+
+function _applyDockerHost() {
+  const input = document.getElementById('dest-url');
+  if (!input) return;
+  input.value = input.value.replace(/localhost/, 'host.docker.internal');
+  _checkDestUrl(input.value);
 }
 
 function toggleTransformEditor() {
@@ -3330,9 +3393,6 @@ async function replayDLQForDestination(destId, destName) {
 
 async function loadTopDestinations() {
   try {
-    const destinationsData = await apiFetch('/destinations');
-    const destinations = destinationsData.destinations || [];
-
     const container = document.getElementById('top-destinations');
     const healthPromises = destinations.slice(0, 5).map(async (dest) => {
       try {
@@ -3426,6 +3486,7 @@ function switchRecoveryTab(tab) {
   document.querySelectorAll('.recovery-tab').forEach(t => { t.style.display = 'none'; });
   const el = document.getElementById('recovery-' + tab);
   if (el) el.style.display = '';
+  if (tab === 'alert-settings') loadAlerts();
 }
 
 function _renderRecoveryFailures(failures) {
@@ -3759,12 +3820,13 @@ let _insightReport = null;
 let _insightMessages = [];
 
 function switchInsightTab(tab) {
-  ['this-week', 'archive'].forEach(t => {
+  ['this-week', 'trends', 'archive'].forEach(t => {
     document.getElementById('ins-tab-' + t).classList.toggle('active', t === tab);
     document.getElementById('ins-panel-' + t).style.display = t === tab ? '' : 'none';
   });
   document.getElementById('ins-generate-btn').style.display = tab === 'this-week' ? '' : 'none';
   if (tab === 'archive') _loadInsightArchive();
+  if (tab === 'trends') loadAnalytics();
 }
 
 async function loadInsights() {

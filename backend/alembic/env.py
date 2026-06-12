@@ -35,15 +35,15 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        # Prevent any single migration step from holding a lock for more than
-        # 5 s. Statements that can't acquire their lock in time will raise
-        # rather than silently blocking all application traffic behind them.
-        connection.execute(
-            __import__("sqlalchemy").text("SET lock_timeout = '5s'")
-        )
         context.configure(connection=connection, target_metadata=target_metadata)
 
         with context.begin_transaction():
+            # SET must be inside begin_transaction so SQLAlchemy 2.x autobegin
+            # does not fire before alembic owns the transaction (otherwise DDL
+            # commits are swallowed and the DB stays on the previous revision).
+            connection.execute(
+                __import__("sqlalchemy").text("SET lock_timeout = '5s'")
+            )
             context.run_migrations()
 
 

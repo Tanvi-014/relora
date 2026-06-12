@@ -23,6 +23,8 @@ from app.logging_config import configure_logging
 
 from app.routers import auth, projects, destinations, webhooks, alerts, event_types, ai_tools, dlq, simulator, consumer, system
 from app.routers import slo, schema_drift, events as events_router, insights as insights_router
+from app.routers import onboarding as onboarding_router
+from app.routers import test_inbox as test_inbox_router
 
 configure_logging()
 logger = logging.getLogger("relora.api")
@@ -249,6 +251,8 @@ app.include_router(slo.router)
 app.include_router(schema_drift.router)
 app.include_router(events_router.router)
 app.include_router(insights_router.router)
+app.include_router(onboarding_router.router)
+app.include_router(test_inbox_router.router)
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIR = os.path.abspath(os.path.join(CURRENT_DIR, "..", "..", "frontend"))

@@ -14,9 +14,10 @@ import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional
+import uuid as _uuid_mod
 from uuid import UUID
 
-from sqlalchemy import select, func, and_, text
+from sqlalchemy import select, func, and_, text, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -24,7 +25,7 @@ from app.db import async_session
 from app.health_engine import HealthEngine
 from app.incident_engine import IncidentEngine
 from app.models import (
-    Incident, IncidentState, Webhook, Destination,
+    Incident, IncidentState, Webhook, Destination, Project,
     CircuitState, TrendState, FailureSeverity,
     DestinationReliabilitySnapshot, WeeklyInsightReport,
 )
@@ -110,14 +111,17 @@ class IncidentScheduler:
     async def _check_health_scores(self, db: AsyncSession):
         """Check health scores and create incidents if below threshold."""
         try:
-            # Get all projects
-            result = await db.execute(select(func.distinct(Webhook.project_id)).where(
-                Webhook.project_id.isnot(None)
+            result = await db.execute(select(func.distinct(Webhook.tenant_id)).where(
+                Webhook.tenant_id.isnot(None)
             ))
-            project_ids = result.scalars().all()
-            
-            for project_id in project_ids:
-                health_data = await HealthEngine.calculate_dlq_health_score(db, str(project_id))
+            tenant_ids = result.scalars().all()
+
+            for tenant_id in tenant_ids:
+                project = (await db.execute(select(Project).where(Project.api_key == tenant_id))).scalar_one_or_none()
+                if not project:
+                    continue
+                project_id = project.id
+                health_data = await HealthEngine.calculate_dlq_health_score(db, tenant_id)
                 
                 if health_data["overall_score"] < self.HEALTH_SCORE_THRESHOLD:
                     # Check if there's already an incident for low health
@@ -137,7 +141,7 @@ class IncidentScheduler:
                     if not existing_incident:
                         # Create new incident for low health
                         incident = Incident(
-                            id=UUID(),
+                            id=_uuid_mod.uuid4(),
                             project_id=project_id,
                             incident_signature=signature,
                             state=IncidentState.OPEN.value,
@@ -169,36 +173,39 @@ class IncidentScheduler:
             fifteen_min_ago = now - timedelta(minutes=15)
             result_15m = await db.execute(
                 select(
-                    Webhook.project_id,
+                    Webhook.tenant_id,
                     func.count(Webhook.id).label("count"),
                 ).where(
                     and_(
                         Webhook.status == "failed",
                         Webhook.created_at >= fifteen_min_ago,
-                        Webhook.project_id.isnot(None),
+                        Webhook.tenant_id.isnot(None),
                     )
-                ).group_by(Webhook.project_id)
+                ).group_by(Webhook.tenant_id)
             )
-            
+
             for row in result_15m:
                 if row.count >= self.DLQ_GROWTH_THRESHOLD_15M:
-                    signature = f"dlq_growth_15m_{row.project_id}"
-                    
+                    project = (await db.execute(select(Project).where(Project.api_key == row.tenant_id))).scalar_one_or_none()
+                    if not project:
+                        continue
+                    signature = f"dlq_growth_15m_{project.id}"
+
                     existing = await db.execute(
                         select(Incident).where(
                             and_(
-                                Incident.project_id == row.project_id,
+                                Incident.project_id == project.id,
                                 Incident.incident_signature == signature,
                                 Incident.state == IncidentState.OPEN.value,
                             )
                         )
                     )
                     existing_incident = existing.scalar_one_or_none()
-                    
+
                     if not existing_incident:
                         incident = Incident(
-                            id=UUID(),
-                            project_id=row.project_id,
+                            id=_uuid_mod.uuid4(),
+                            project_id=project.id,
                             incident_signature=signature,
                             state=IncidentState.OPEN.value,
                             failure_category="SYSTEM_HEALTH",
@@ -247,7 +254,7 @@ class IncidentScheduler:
                 
                 if not existing_incident:
                     incident = Incident(
-                        id=UUID(),
+                        id=_uuid_mod.uuid4(),
                         project_id=dest.project_id,
                         destination_id=dest.id,
                         incident_signature=signature,
@@ -281,7 +288,7 @@ class IncidentScheduler:
                     Destination.project_id,
                     Destination.name,
                     func.count(Webhook.id).label("total"),
-                    func.sum(func.case((Webhook.status == "failed", 1), else_=0)).label("failed"),
+                    func.sum(case((Webhook.status == "failed", 1), else_=0)).label("failed"),
                 ).join(
                     Webhook, Destination.id == Webhook.destination_id
                 ).where(
@@ -313,7 +320,7 @@ class IncidentScheduler:
                         
                         if not existing_incident:
                             incident = Incident(
-                                id=UUID(),
+                                id=_uuid_mod.uuid4(),
                                 project_id=row.project_id,
                                 destination_id=row.id,
                                 incident_signature=signature,
@@ -364,7 +371,7 @@ class IncidentScheduler:
                         select(
                             func.count(Webhook.id).label("total"),
                             func.sum(
-                                func.case((Webhook.status == "completed", 1), else_=0)
+                                case((Webhook.status == "completed", 1), else_=0)
                             ).label("completed"),
                         ).where(
                             Webhook.tenant_id == tid,

@@ -16,7 +16,7 @@ from typing import Dict, Optional
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Webhook, DeliveryAttempt, Destination, CircuitState, TrendState
+from app.models import Webhook, DeliveryAttempt, Destination, CircuitState, TrendState, Project
 
 
 class HealthEngine:
@@ -114,7 +114,7 @@ class HealthEngine:
             Webhook.status == "failed", Webhook.is_simulation == False  # noqa: E712
         )
         if project_id:
-            query = query.where(Webhook.project_id == project_id)
+            query = query.where(Webhook.tenant_id == project_id)
         
         result = await db.execute(query)
         return result.scalar() or 0
@@ -141,7 +141,7 @@ class HealthEngine:
                 )
             )
             if project_id:
-                query = query.where(Webhook.project_id == project_id)
+                query = query.where(Webhook.tenant_id == project_id)
             
             result = await db.execute(query)
             growth_metrics[window_name] = result.scalar() or 0
@@ -155,7 +155,7 @@ class HealthEngine:
             Webhook.status == "failed", Webhook.is_simulation == False  # noqa: E712
         ).order_by(Webhook.created_at.asc())
         if project_id:
-            query = query.where(Webhook.project_id == project_id)
+            query = query.where(Webhook.tenant_id == project_id)
         
         result = await db.execute(query)
         return result.scalar()
@@ -169,7 +169,7 @@ class HealthEngine:
         if project_id:
             # Join with webhooks to filter by project
             query = query.join(Webhook, DeliveryAttempt.webhook_id == Webhook.id).where(
-                Webhook.project_id == project_id
+                Webhook.tenant_id == project_id
             )
         
         result = await db.execute(query)
@@ -183,8 +183,8 @@ class HealthEngine:
         completed_query = select(func.count(Webhook.id)).where(Webhook.status == "completed", ns)
 
         if project_id:
-            total_query = total_query.where(Webhook.project_id == project_id)
-            completed_query = completed_query.where(Webhook.project_id == project_id)
+            total_query = total_query.where(Webhook.tenant_id == project_id)
+            completed_query = completed_query.where(Webhook.tenant_id == project_id)
         
         total_result = await db.execute(total_query)
         total = total_result.scalar() or 0
@@ -200,9 +200,11 @@ class HealthEngine:
     @staticmethod
     async def _get_circuit_state(db: AsyncSession, project_id: Optional[str]) -> Dict:
         """Get circuit breaker state information."""
-        query = select(Destination)
+        query = select(Destination).join(
+            Project, Project.id == Destination.project_id
+        )
         if project_id:
-            query = query.where(Destination.project_id == project_id)
+            query = query.where(Project.api_key == project_id)
         
         result = await db.execute(query)
         destinations = result.scalars().all()

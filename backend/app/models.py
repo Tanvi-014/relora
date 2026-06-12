@@ -245,6 +245,9 @@ class Destination(Base):
     circuit_opened_at = Column(DateTime(timezone=True), nullable=True)
     circuit_next_retry_at = Column(DateTime(timezone=True), nullable=True)
 
+    # Sandbox flag — auto-created for new accounts, used in onboarding
+    is_sandbox = Column(Boolean, nullable=False, default=False, server_default="false")
+
     # SLO
     slo_target_pct = Column(Float, nullable=True)          # e.g. 99.5 means 99.5% success rate
     slo_window_minutes = Column(Integer, nullable=False, default=60)
@@ -273,6 +276,7 @@ class Destination(Base):
             "circuit_failure_count": self.circuit_failure_count,
             "circuit_opened_at": self.circuit_opened_at.isoformat() if self.circuit_opened_at else None,
             "circuit_next_retry_at": self.circuit_next_retry_at.isoformat() if self.circuit_next_retry_at else None,
+            "is_sandbox": self.is_sandbox,
             "slo_target_pct": self.slo_target_pct,
             "slo_window_minutes": self.slo_window_minutes,
             "created_at": self.created_at.isoformat() if self.created_at else None,

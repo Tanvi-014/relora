@@ -9,7 +9,7 @@ const RELORA_DEMO_STEPS = [
   { key: 'fail', label: 'Fail event', title: 'Second destination failed', body: 'The analytics mirror returned 500. Relora scheduled retries with backoff instead of losing the event.', stream: ['FAILED', 'analytics-mirror', '500 server error'], tone: 'err', delay: 10600 },
   { key: 'dlq', label: 'Move to DLQ', title: 'Retries exhausted, event moved to DLQ', body: 'Relora classified the failure as SERVER_ERROR and opened an incident for the destination.', stream: ['DLQ', 'analytics-mirror', 'SERVER_ERROR'], tone: 'err', delay: 15800 },
   { key: 'replay', label: 'Replay event', title: 'Replay started safely', body: 'A controlled replay re-queued the failed delivery at 60 events/min so the recovering destination is protected.', stream: ['REPLAY', 'evt_demo_7a91', '60/min governor'], tone: 'warn', delay: 22200 },
-  { key: 'recover', label: 'Recover event', title: 'Recovered delivery', body: 'The replay succeeded. The DLQ cleared, the incident moved to recovering, and the full path remains auditable.', stream: ['RECOVERED', 'analytics-mirror', '200 in 211 ms'], tone: 'ok', delay: 29200 },
+  { key: 'done', label: 'Everything works', title: 'Everything works well', body: 'The replay succeeded and the full lifecycle is complete — events arrive, deliver, fail gracefully, and recover automatically. Your pipeline is working exactly as designed.', stream: ['RECOVERED', 'analytics-mirror', '200 in 211 ms'], tone: 'ok', delay: 29200 },
 ];
 
 let reloraDemoTimers = [];
@@ -25,6 +25,14 @@ function reloraDemoWrite(state) {
 
 function reloraDemoShouldAutoStart() {
   if (localStorage.getItem(RELORA_DEMO_DONE) === '1') return false;
+  // Don't auto-start while the setup checklist is waiting for demo to be sent
+  // (step 2 = no activity yet). The demo starts manually via fireDemoEvent().
+  const dismissed = localStorage.getItem('relora_onboarding_dismissed') === '1';
+  if (!dismissed) {
+    const hasActivity = parseInt(localStorage.getItem('relora_mc_deliveries') || '0', 10) > 0;
+    const seenEvents  = localStorage.getItem('relora_seen_events') === '1';
+    if (!hasActivity && !seenEvents) return false;
+  }
   return !reloraDemoRead().startedAt;
 }
 
@@ -50,6 +58,17 @@ function reloraDemoStart({ force = false } = {}) {
       clearInterval(reloraDemoRenderTick);
       reloraDemoRenderTick = null;
       reloraDemoRender();
+      setTimeout(() => {
+        // Remove demo event rows from the activity stream
+        const streamBody = document.getElementById('mc-stream-body');
+        if (streamBody) streamBody.querySelectorAll('.demo-event').forEach(el => el.remove());
+        if (typeof loadDashboard === 'function') loadDashboard();
+        setTimeout(() => {
+          if (typeof reloraTourShouldAutoStart === 'function' && reloraTourShouldAutoStart()) {
+            if (typeof reloraTourStart === 'function') reloraTourStart();
+          }
+        }, 800);
+      }, 1500);
       return;
     }
     reloraDemoRender();
@@ -80,6 +99,8 @@ function reloraDemoCurrentIndex() {
 
 function reloraDemoRender(index = reloraDemoCurrentIndex()) {
   if (index < 0) return;
+  // Yield entirely to real data once the user has a real (non-sandbox) destination
+  if (window._reloraHasRealDestinations) return;
   reloraDemoRenderGuide(index);
   reloraDemoRenderStream(index);
   reloraDemoRenderMetrics(index);
@@ -88,7 +109,7 @@ function reloraDemoRender(index = reloraDemoCurrentIndex()) {
 }
 
 function reloraDemoRenderGuide(index) {
-  const section = document.getElementById('onboarding-section');
+  const section = document.getElementById('demo-journey-section');
   if (!section) return;
   const active = RELORA_DEMO_STEPS[index] || RELORA_DEMO_STEPS[0];
   section.style.display = '';
@@ -123,6 +144,8 @@ function reloraDemoRows(index) {
 function reloraDemoRenderStream(index) {
   const body = document.getElementById('mc-stream-body');
   if (!body) return;
+  // Don't stomp on real event rows that _renderFeed already placed
+  if (body.querySelector('.mc-event:not(.demo-event)')) return;
   body.innerHTML = reloraDemoRows(index).map((row, rowIndex) => `
     <div class="mc-event demo-event ${rowIndex === 0 ? 'mc-event--new' : ''}">
       <span class="mc-event-time">${row.time}</span>

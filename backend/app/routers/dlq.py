@@ -107,8 +107,7 @@ async def get_dlq_classifications(
         func.count(DeliveryAttempt.id).desc()
     )
 
-    if project_id:
-        query = query.where(Webhook.project_id == UUID(project_id))
+    query = query.where(Webhook.tenant_id == tenant_id)
 
     result = await db.execute(query)
     rows = result.all()
@@ -147,8 +146,7 @@ async def get_dlq_trends(
             )
         )
 
-        if project_id:
-            query = query.where(Webhook.project_id == UUID(project_id))
+        query = query.where(Webhook.tenant_id == tenant_id)
 
         result = await db.execute(query)
         count = result.scalar() or 0
@@ -304,7 +302,7 @@ async def resolve_all_incidents(
         # Only auto-resolve if no failed (non-simulation) webhooks remain for this project
         remaining = await db.scalar(
             select(func.count(Webhook.id)).where(
-                Webhook.project_id == incident.project_id,
+                Webhook.tenant_id == tenant_id,
                 Webhook.status == "failed",
                 Webhook.is_simulation == False,  # noqa: E712
             )
@@ -338,7 +336,7 @@ async def archive_dlq(
         SELECT COUNT(*) FROM webhooks
         WHERE status = 'failed'
           AND tenant_id = :tenant_id
-          AND updated_at < NOW() - :interval::interval
+          AND updated_at < NOW() - CAST(:interval AS INTERVAL)
     """)
     count_row = await db.execute(
         count_stmt,
@@ -353,7 +351,7 @@ async def archive_dlq(
         DELETE FROM webhooks
         WHERE status = 'failed'
           AND tenant_id = :tenant_id
-          AND updated_at < NOW() - :interval::interval
+          AND updated_at < NOW() - CAST(:interval AS INTERVAL)
     """)
     await db.execute(
         delete_stmt,

@@ -37,6 +37,8 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://relora:${POSTGRES_PASSWORD:-reloradev}@postgres:5432/relora
       SYNC_DATABASE_URL: postgresql://relora:${POSTGRES_PASSWORD:-reloradev}@postgres:5432/relora
+    volumes:
+      - ./backend:/app/backend:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -71,9 +73,10 @@ services:
       ENABLE_SIMULATOR: "true"
       FORCE_HTTPS: ${FORCE_HTTPS:-false}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      INTERNAL_API_URL: http://relora-api:8000
     volumes:
-      - ./backend:/workspace/backend:ro
-      - ./frontend:/workspace/frontend:ro
+      - ./backend:/app/backend:ro
+      - ./frontend:/app/frontend:ro
     depends_on:
       relora-migrate:
         condition: service_completed_successfully
@@ -123,7 +126,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://relora:${POSTGRES_PASSWORD:-reloradev}@postgres:5432/relora
     volumes:
-      - ./backend:/workspace/backend:ro
+      - ./backend:/app/backend:ro
     ports:
       - "9000:9000"
     healthcheck:

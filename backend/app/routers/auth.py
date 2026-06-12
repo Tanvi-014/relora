@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import logging
+import uuid as _uuid_mod
 
 from fastapi import APIRouter, Body, Cookie, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
@@ -24,7 +25,7 @@ from app.email import (
     send_reset_email,
     send_verification_email,
 )
-from app.models import User
+from app.models import Destination, Project, ProjectMember, User
 from app.rate_limit import check_rate_limit
 
 logger = logging.getLogger("relora.api")
@@ -77,6 +78,28 @@ async def register(
         raise HTTPException(400, "Email already registered")
     user = User(email=email, password_hash=get_password_hash(password))
     db.add(user)
+    await db.flush()  # get user.id before creating dependent records
+
+    # Auto-provision a project and a sandbox destination so new users can
+    # experience Relora immediately without any manual configuration.
+    project = Project(name="My Project", api_key=f"hk_live_{_uuid_mod.uuid4().hex}")
+    db.add(project)
+    await db.flush()  # get project.id
+
+    db.add(ProjectMember(project_id=project.id, user_id=user.id, role="owner"))
+
+    sandbox_url = f"{settings.internal_api_url}/api/v1/sandbox/inbox"
+    db.add(Destination(
+        project_id=project.id,
+        name="Relora Sandbox",
+        url=sandbox_url,
+        description="Auto-created sandbox for onboarding. Fire demo events here, then delete it when you're ready to go live.",
+        is_enabled=True,
+        max_retries=1,
+        backoff_base_seconds=5,
+        is_sandbox=True,
+    ))
+
     await db.commit()
     await db.refresh(user)
     logger.info("User registered", extra={"event": "user.registered", "user_id": str(user.id)})

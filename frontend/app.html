@@ -106,7 +106,6 @@
     <!-- ── Sidebar ── -->
     <nav class="sidebar">
 
-      <!-- Primary -->
       <div class="nav-item active" data-page="overview" onclick="navTo('overview')">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
@@ -119,16 +118,8 @@
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
           <path d="M22 2L11 13"/><path d="M22 2L15 22l-4-9-9-4 20-7z"/>
         </svg>
-        Webhooks
+        Events
         <span class="nav-fail-count hidden" id="failed-badge">0</span>
-      </div>
-
-      <div class="nav-item" data-page="dlq-intelligence" onclick="navTo('dlq-intelligence')">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-        </svg>
-        Failed Deliveries
-        <span class="nav-fail-count hidden" id="dlq-nav-badge">0</span>
       </div>
 
       <div class="nav-item" data-page="destinations" onclick="navTo('destinations')">
@@ -142,65 +133,30 @@
 
       <div class="nav-item" data-page="recovery" onclick="navTo('recovery')">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/>
+          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
         </svg>
-        Fix &amp; Replay
+        Failed Events
+        <span class="nav-fail-count hidden" id="dlq-nav-badge">0</span>
       </div>
 
       <div class="nav-divider"></div>
 
-      <!-- Analyze -->
       <div class="nav-item nav-item--secondary" data-page="insights" onclick="navTo('insights')">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
-          <polyline points="17 6 23 6 23 12"/>
-        </svg>
-        Insights
-      </div>
-
-      <div class="nav-item nav-item--secondary" data-page="pipeline" onclick="navTo('pipeline')">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="5 9 2 12 5 15"/><polyline points="19 9 22 12 19 15"/>
-          <line x1="2" y1="12" x2="22" y2="12"/>
-        </svg>
-        Event Flow
-      </div>
-
-      <div class="nav-divider"></div>
-
-      <!-- Utility — visually quieter -->
-      <div class="nav-item nav-item--utility" data-page="analytics" onclick="navTo('analytics')">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
           <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
         </svg>
-        Reliability Trends
+        Analytics
       </div>
 
-      <div class="nav-item nav-item--utility" data-page="alerts" onclick="navTo('alerts')">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-        </svg>
-        Alerts
-      </div>
-
-      <div class="nav-item nav-item--utility" data-page="replay" onclick="navTo('replay')">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/>
-        </svg>
-        Replay
-      </div>
-
-      <div class="nav-item nav-item--utility" data-page="audit" onclick="navTo('audit')">
+      <div class="nav-item nav-item--secondary" data-page="audit" onclick="navTo('audit')">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
           <polyline points="14 2 14 8 20 8"/>
           <line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
         </svg>
-        Audit
+        Audit Log
       </div>
 
-      <!-- Bottom: account -->
       <div class="nav-spacer"></div>
 
       <div class="nav-item nav-item--utility" data-page="team" onclick="navTo('team')">
@@ -297,8 +253,11 @@
             </div>
           </div>
 
-          <!-- First-delivery celebration — shown by _triggerFirstDeliveryCelebration only -->
+          <!-- Setup guide — shown until user activates; dismissible per-tab-visit -->
           <div id="onboarding-section" class="obs-card" style="display:none"></div>
+
+          <!-- Live demo journey — separate from setup guide -->
+          <div id="demo-journey-section" style="display:none"></div>
 
           <!-- Triage — surfaced only when action is required -->
           <div class="mc-triage" id="mc-triage" style="display:none">
@@ -333,7 +292,7 @@
               <div class="mc-sidebar-block">
                 <div class="mc-panel-hdr" style="padding:10px 12px">
                   <span class="mc-panel-label">Destinations</span>
-                  <button class="mc-btn-bare" onclick="openDestModal()">+ add</button>
+                  <button class="mc-btn-bare" onclick="openDestWizard()">+ add</button>
                 </div>
                 <div id="mc-dest-list" class="mc-dest-list">
                   <div class="mc-stream-empty" style="padding:16px 12px">No destinations configured</div>
@@ -397,7 +356,7 @@
              Webhooks page
              ══════════════════════════════════════════ -->
         <div class="page" id="page-webhooks">
-          <div class="page-title">Webhooks</div>
+          <div class="page-title">Events</div>
           <div class="page-subtitle">Every ingested event and its full delivery history. Click a row to inspect payload, attempts, and retry timeline.</div>
           <div class="table-wrap">
             <div class="table-toolbar">
@@ -438,7 +397,7 @@
               <div class="page-subtitle" style="margin-bottom:0">Configure where Relora delivers events. Each destination has independent retry settings, health monitoring, and delivery tracking.</div>
             </div>
             <div style="display:flex;gap:8px">
-              <button class="btn btn-primary" onclick="openDestModal()">
+              <button class="btn btn-primary" onclick="openDestWizard()">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
                 New Destination
               </button>
@@ -486,35 +445,12 @@
         <!-- ══════════════════════════════════════════
              Alerts page
              ══════════════════════════════════════════ -->
-        <div class="page" id="page-alerts">
-          <div class="page-hdr">
-            <div>
-              <div class="page-title">Alerts</div>
-              <div class="page-subtitle" style="margin-bottom:0">Get notified when deliveries fail — so you can act before your customers notice.</div>
-            </div>
-            <button class="btn btn-primary" onclick="openAlertModal()">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
-              New Alert
-            </button>
-          </div>
-          <div id="alerts-list"></div>
-        </div>
+        <!-- page-alerts: ghost page kept for navTo compat — content moved to recovery alert-settings tab -->
+        <div class="page" id="page-alerts"></div>
 
 
-        <!-- ══════════════════════════════════════════
-             Analytics page
-             ══════════════════════════════════════════ -->
-        <div class="page" id="page-analytics">
-          <div class="page-title">Reliability Trends</div>
-          <div class="page-subtitle">Delivery speed and success rates per destination, last 7 days. See exactly how your system is performing.</div>
-          <div id="analytics-content">
-            <div class="empty-state">
-              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-              <div class="title">No data yet</div>
-              <div class="desc">Once events start flowing, you'll see delivery speed and success rates per destination — so you can spot which ones are slow or unreliable before your users do.</div>
-            </div>
-          </div>
-        </div>
+        <!-- page-analytics: ghost page kept for navTo compat — content moved to Analytics > Trends tab -->
+        <div class="page" id="page-analytics"></div>
 
 
         <!-- ══════════════════════════════════════════
@@ -807,8 +743,8 @@
         <div class="page" id="page-recovery">
           <div class="page-hdr">
             <div>
-              <div class="page-title">Fix &amp; Replay</div>
-              <div class="page-subtitle" style="margin-bottom:0">Everything that needs your attention, in one place. Investigate failures and replay events without hunting across tabs.</div>
+              <div class="page-title">Failed Events</div>
+              <div class="page-subtitle" style="margin-bottom:0">Everything that went wrong, in one place. Investigate failures, replay events, and configure alert notifications.</div>
             </div>
             <button class="btn btn-secondary btn-sm" onclick="loadRecovery()">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
@@ -820,6 +756,7 @@
             <div class="tab" data-rtab="incidents" onclick="switchRecoveryTab('incidents')">Incidents</div>
             <div class="tab" data-rtab="dlq" onclick="switchRecoveryTab('dlq')">DLQ</div>
             <div class="tab" data-rtab="replays" onclick="switchRecoveryTab('replays')">Replays</div>
+            <div class="tab" data-rtab="alert-settings" onclick="switchRecoveryTab('alert-settings')">Alert Settings</div>
           </div>
           <div id="recovery-failures" class="recovery-tab">
             <div id="recovery-failures-body">
@@ -849,6 +786,12 @@
             </div>
           </div>
           <div id="recovery-replays" class="recovery-tab" style="display:none">
+            <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+              <button class="btn btn-primary btn-sm" onclick="navTo('replay')">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
+                Bulk Replay
+              </button>
+            </div>
             <div id="recovery-replays-body">
               <div class="empty-state">
                 <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.12"/></svg>
@@ -856,6 +799,17 @@
                 <div class="desc">Bulk replay jobs appear here</div>
               </div>
             </div>
+          </div>
+
+          <div id="recovery-alert-settings" class="recovery-tab" style="display:none">
+            <div class="page-hdr" style="margin-bottom:16px">
+              <div style="font-size:13px;color:var(--text2)">Get notified when deliveries fail — before your customers notice.</div>
+              <button class="btn btn-primary btn-sm" onclick="openAlertModal()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+                New Alert
+              </button>
+            </div>
+            <div id="alerts-list"></div>
           </div>
         </div>
 
@@ -866,7 +820,8 @@
 
           <!-- Tabs + actions -->
           <div class="ins-tabs-bar">
-            <button class="ins-tab active" id="ins-tab-this-week" onclick="switchInsightTab('this-week')">This Week</button>
+            <button class="ins-tab active" id="ins-tab-this-week" onclick="switchInsightTab('this-week')">Weekly Report</button>
+            <button class="ins-tab" id="ins-tab-trends" onclick="switchInsightTab('trends')">Trends</button>
             <button class="ins-tab" id="ins-tab-archive" onclick="switchInsightTab('archive')">Archive</button>
             <div style="flex:1"></div>
             <button class="btn btn-ghost btn-sm" id="ins-generate-btn" onclick="insightForceGenerate()" style="font-size:11px;gap:6px">
@@ -887,6 +842,20 @@
           <!-- Archive panel -->
           <div id="ins-panel-archive" class="ins-panel" style="display:none">
             <div id="ins-archive-list"></div>
+          </div>
+
+          <!-- Trends panel — delivery speed and success rates per destination -->
+          <div id="ins-panel-trends" class="ins-panel" style="display:none">
+            <div style="margin-bottom:12px">
+              <div style="font-size:13px;color:var(--text2)">Delivery speed and success rates per destination, last 7 days.</div>
+            </div>
+            <div id="analytics-content">
+              <div class="empty-state">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.25"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                <div class="title">No data yet</div>
+                <div class="desc">Once events start flowing, you'll see delivery speed and success rates per destination.</div>
+              </div>
+            </div>
           </div>
 
         </div><!-- /page-insights -->
@@ -1120,10 +1089,16 @@
     <div class="modal-body">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
         <div class="input-group" style="grid-column:1/-1"><label class="input-label">Name *</label><input class="input" id="dest-name" placeholder="My App Webhook"></div>
-        <div class="input-group" style="grid-column:1/-1"><label class="input-label">URL *</label><input class="input" id="dest-url" placeholder="https://myapp.com/webhooks"></div>
+        <div class="input-group" style="grid-column:1/-1">
+          <label class="input-label">URL *</label>
+          <input class="input" id="dest-url" placeholder="https://myapp.com/webhooks" oninput="_checkDestUrl(this.value)">
+          <div id="dest-url-warn" style="display:none;margin-top:6px;padding:8px 10px;border-radius:6px;background:rgba(255,180,0,.08);border:1px solid rgba(255,180,0,.25);font-size:12px;color:#FFB400;line-height:1.5">
+            <strong>Docker Network Issue?</strong> When Relora runs in Docker, <code>localhost</code> refers to the container, not your machine. Use <code style="cursor:pointer;text-decoration:underline;font-weight:600" id="dest-url-suggest" onclick="_applyDockerHost()"></code> instead.
+          </div>
+        </div>
         <div class="input-group"><label class="input-label">Max Retries</label><input class="input" type="number" id="dest-max-retries" value="5"></div>
         <div class="input-group"><label class="input-label">Backoff Base (seconds)</label><input class="input" type="number" id="dest-backoff" value="30"></div>
-        <div class="input-group" style="grid-column:1/-1"><label class="input-label">Filter Expression</label><input class="input" id="dest-filter" placeholder="event.type == 'payment.succeeded'"></div>
+        <div class="input-group" style="grid-column:1/-1"><label class="input-label">Filter Expression</label><div style="position:relative;display:flex;align-items:center"><input class="input" id="dest-filter" placeholder="event.type == 'payment.succeeded'" style="padding-right:2rem"><button type="button" id="dest-filter-clear" onclick="document.getElementById('dest-filter').value='';this.style.display='none'" title="Clear filter" style="display:none;position:absolute;right:0.5rem;background:none;border:none;cursor:pointer;color:var(--text3);font-size:1rem;line-height:1;padding:0">×</button></div></div>
         <div class="input-group" style="grid-column:1/-1"><label class="input-label">Ordering Key Field (dot-path)</label><input class="input" id="dest-ordering-key" placeholder="data.customer_id"></div>
         <div class="input-group" style="grid-column:1/-1"><label class="input-label">Webhook Secret (Standard Webhooks signing)</label><input class="input" id="dest-secret" placeholder="whsec_… or leave blank"></div>
         <div class="input-group" style="grid-column:1/-1">
@@ -1274,5 +1249,6 @@
 
 <script src="app.js"></script>
 <script src="demo-journey.js"></script>
+<script src="guided-tour.js"></script>
 </body>
 </html>

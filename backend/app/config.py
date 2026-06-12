@@ -78,6 +78,10 @@ class Settings(BaseSettings):
 
     # Email verification
     APP_BASE_URL: str = "http://localhost:8000"          # public-facing base URL for links
+    # Internal URL for service-to-service calls (e.g. http://relora-api:8000 in Docker).
+    # If empty, falls back to APP_BASE_URL. Used as the sandbox destination URL so the
+    # delivery worker can reach the sandbox inbox endpoint from within the container network.
+    INTERNAL_API_URL: str = ""
     EMAIL_VERIFICATION_REQUIRED: bool = False             # soft gate — warn but don't block
     EMAIL_VERIFICATION_EXPIRY_HOURS: int = 24
 
@@ -94,6 +98,10 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "production"
+
+    @property
+    def internal_api_url(self) -> str:
+        return self.INTERNAL_API_URL or self.APP_BASE_URL
 
     @property
     def cors_origins(self) -> List[str]:

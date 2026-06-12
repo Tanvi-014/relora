@@ -12,8 +12,8 @@ from sqlalchemy import select, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    Incident, IncidentState, Webhook, DeliveryAttempt, 
-    Destination, FailureSeverity, FailureRecoverability, TrendState
+    Incident, IncidentState, Webhook, DeliveryAttempt,
+    Destination, FailureSeverity, FailureRecoverability, TrendState, Project,
 )
 from app.failure_classifier import FailureClassifier
 
@@ -116,10 +116,11 @@ class IncidentEngine:
         ]
         
         for window_name, window_start in time_windows:
+            tid_subq = select(Project.api_key).where(Project.id == incident.project_id).scalar_subquery()
             result = await db.execute(
                 select(func.count(Webhook.id)).where(
                     and_(
-                        Webhook.project_id == incident.project_id,
+                        Webhook.tenant_id == tid_subq,
                         Webhook.destination_id == incident.destination_id if incident.destination_id else True,
                         Webhook.status == "failed",
                         Webhook.created_at >= window_start,
@@ -253,10 +254,11 @@ class IncidentEngine:
         
         for incident in incidents:
             # Check if there have been any new failures in the last hour
+            tid_subq = select(Project.api_key).where(Project.id == incident.project_id).scalar_subquery()
             recent_failures = await db.execute(
                 select(func.count(Webhook.id)).where(
                     and_(
-                        Webhook.project_id == incident.project_id,
+                        Webhook.tenant_id == tid_subq,
                         Webhook.destination_id == incident.destination_id if incident.destination_id else True,
                         Webhook.status == "failed",
                         Webhook.created_at >= one_hour_ago,
@@ -332,7 +334,8 @@ class IncidentEngine:
         )
 
         if project_id:
-            query = query.where(Webhook.project_id == project_id)
+            tid_subq = select(Project.api_key).where(Project.id == project_id).scalar_subquery()
+            query = query.where(Webhook.tenant_id == tid_subq)
 
         result = await db.execute(query)
         rows = result.all()
