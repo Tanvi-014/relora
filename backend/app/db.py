@@ -3,8 +3,16 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from app.config import settings
 from app.models import Base
 
+def _async_url(url: str) -> str:
+    # Neon and most providers give postgres:// or postgresql:// — coerce to asyncpg driver
+    for prefix in ("postgresql://", "postgres://"):
+        if url.startswith(prefix):
+            return "postgresql+asyncpg://" + url[len(prefix):]
+    return url
+
+
 engine = create_async_engine(
-    settings.DATABASE_URL,
+    _async_url(settings.DATABASE_URL),
     echo=settings.DEBUG,
     future=True,
     pool_size=settings.DB_POOL_SIZE,
