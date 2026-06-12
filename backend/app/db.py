@@ -7,7 +7,11 @@ def _async_url(url: str) -> str:
     # Neon and most providers give postgres:// or postgresql:// — coerce to asyncpg driver
     for prefix in ("postgresql://", "postgres://"):
         if url.startswith(prefix):
-            return "postgresql+asyncpg://" + url[len(prefix):]
+            url = "postgresql+asyncpg://" + url[len(prefix):]
+            break
+    # asyncpg uses ssl=<mode> not sslmode=<mode> (libpq param)
+    if "sslmode=" in url:
+        url = url.replace("sslmode=", "ssl=")
     return url
 
 
