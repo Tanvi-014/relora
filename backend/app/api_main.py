@@ -2,6 +2,7 @@
 Pure API entrypoint — no worker pool.
 Run with: uvicorn app.api_main:app --host 0.0.0.0 --port 8000
 """
+import asyncio
 import logging
 import os
 import sys
@@ -96,6 +97,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+def _run_migrations_sync() -> None:
+    from alembic.config import Config
+    from alembic import command as alembic_command
+    alembic_cfg = Config(os.path.join(os.path.dirname(__file__), "..", "alembic.ini"))
+    alembic_command.upgrade(alembic_cfg, "head")
+
+
 async def _recover_stuck_webhooks() -> None:
     """
     Reset webhooks stuck in 'processing' back to 'pending' so they will be retried.
@@ -151,9 +159,8 @@ async def _recover_stuck_replay_jobs() -> None:
 async def lifespan(app: FastAPI):
     _validate_production_config()
     setup_telemetry(service_name="relora-api")
-    if settings.AUTO_CREATE_TABLES:
-        logger.info("AUTO_CREATE_TABLES=true, initializing tables...")
-        await init_db()
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _run_migrations_sync)
 
     await _recover_stuck_webhooks()
     await _recover_stuck_replay_jobs()
