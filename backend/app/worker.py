@@ -182,6 +182,7 @@ class WebhookWorker:
 
             # Load destination config for webhook_secret, custom_headers, base_seconds
             dest_config: Optional[dict] = None
+            dest_obj = None
             base_seconds = settings.BACKOFF_BASE_SECONDS
             if destination_id:
                 dest_result = await session.execute(

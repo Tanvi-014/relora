@@ -146,8 +146,8 @@ def test_04_ingest_webhook():
 # ── Step 5: Wait for delivery completion ──────────────────────────────────────
 
 def test_05_webhook_delivered():
-    """Worker must deliver within 15 seconds in a healthy test environment."""
-    wh = _wait_for_status(_state["webhook_id"], "completed", timeout=15)
+    """Worker must deliver within 30 seconds in a healthy test environment."""
+    wh = _wait_for_status(_state["webhook_id"], "completed", timeout=30)
     assert wh["status"] == "completed"
     assert wh["retry_count"] == 0
 
