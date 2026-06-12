@@ -100,7 +100,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 def _run_migrations_sync() -> None:
     from alembic.config import Config
     from alembic import command as alembic_command
-    alembic_cfg = Config(os.path.join(os.path.dirname(__file__), "..", "alembic.ini"))
+    backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    alembic_cfg = Config(os.path.join(backend_dir, "alembic.ini"))
+    alembic_cfg.set_main_option("script_location", os.path.join(backend_dir, "alembic"))
     alembic_command.upgrade(alembic_cfg, "head")
 
 
