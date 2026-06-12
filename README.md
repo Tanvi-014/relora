@@ -414,6 +414,7 @@ API docs available at [http://localhost:8000/api/docs](http://localhost:8000/api
 
 - [Stripe Integration Guide](docs/STRIPE_INTEGRATION.md)
 - [GitHub Integration Guide](docs/GITHUB_INTEGRATION.md)
+- [Koyeb Deploy Guide](docs/KOYEB_DEPLOY.md) — free hosting, no credit card
 
 ---
 

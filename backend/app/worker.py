@@ -198,6 +198,7 @@ class WebhookWorker:
                     base_seconds = dest_obj.backoff_base_seconds
                     max_retries = dest_obj.max_retries
 
+            is_sandbox = bool(dest_obj and dest_obj.is_sandbox)
             await self._deliver_webhook(
                 session, client,
                 webhook_id, tenant_id, event_id,
@@ -205,6 +206,7 @@ class WebhookWorker:
                 payload, headers,
                 retry_count, max_retries,
                 base_seconds, dest_config,
+                is_sandbox=is_sandbox,
             )
             return True
 
@@ -223,6 +225,7 @@ class WebhookWorker:
         max_retries: int,
         base_seconds: int,
         dest_config: Optional[dict],
+        is_sandbox: bool = False,
     ):
         attempt_number = retry_count + 1
         start_time = time.perf_counter()
@@ -463,6 +466,7 @@ class WebhookWorker:
                 "destination_url": destination_url,
                 "duration_ms": duration_ms,
                 "attempt_number": attempt_number,
+                "is_sandbox": is_sandbox,
             }
             
             # Broadcast via WebSocket

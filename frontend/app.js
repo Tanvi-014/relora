@@ -277,17 +277,19 @@ function connectWS() {
         const activePage = document.querySelector('.page.active')?.id;
         if (selectedWebhookId === d.id && activePage === 'page-webhooks') _debouncedOpenPanel(d.id);
 
-        // Push to activity feed + pulse arch viz
+        // Push to activity feed + pulse arch viz (skip sandbox/demo deliveries)
         const destLabel = _shortUrl(d.destination_url);
-        if (d.status === 'completed') {
-          _pushFeedEvent('ok', 'Delivery succeeded', destLabel, d.updated_at);
-          _arcVizPulse('ok');
-          _pipelineNodeFlash('pipe-node-relay', 'ok');
-          _triggerFirstDeliveryCelebration(d);
-        } else if (d.status === 'failed') {
-          _pushFeedEvent('err', 'Delivery failed', destLabel, d.updated_at);
-          _arcVizPulse('err');
-          _pipelineNodeFlash('pipe-node-dlq', 'err');
+        if (!d.is_sandbox) {
+          if (d.status === 'completed') {
+            _pushFeedEvent('ok', 'Delivery succeeded', destLabel, d.updated_at);
+            _arcVizPulse('ok');
+            _pipelineNodeFlash('pipe-node-relay', 'ok');
+            _triggerFirstDeliveryCelebration(d);
+          } else if (d.status === 'failed') {
+            _pushFeedEvent('err', 'Delivery failed', destLabel, d.updated_at);
+            _arcVizPulse('err');
+            _pipelineNodeFlash('pipe-node-dlq', 'err');
+          }
         }
 
         // Always refresh the DLQ badge count so indicators stay accurate

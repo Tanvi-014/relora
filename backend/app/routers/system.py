@@ -315,6 +315,7 @@ async def get_dashboard(
         WHERE w.tenant_id = :tid
           AND w.status IN ('completed', 'failed')
           AND w.is_simulation = false
+          AND (d.is_sandbox IS NOT TRUE)
           AND w.updated_at >= NOW() - INTERVAL '24 hours'
         ORDER BY w.updated_at DESC
         LIMIT 20
