@@ -1,30 +1,77 @@
 services:
   - type: web
-    name: relora
-    env: python
+    name: relora-api
+    runtime: docker
+    dockerfilePath: backend/Dockerfile
+    dockerContext: .
     plan: free
-    buildCommand: cd backend && pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
-    
+    startCommand: uvicorn app.api_main:app --host 0.0.0.0 --port 8000
+    preDeployCommand: cd /app/backend && alembic upgrade head
     envVars:
-      - key: DATABASE_URL
-        fromDatabase:
-          name: relora-db
-          property: connectionString
-      - key: SYNC_DATABASE_URL
-        fromDatabase:
-          name: relora-db
-          property: connectionString
-      - key: JWT_SECRET
-        generateValue: true
+      - key: ENVIRONMENT
+        value: production
       - key: AUTO_CREATE_TABLES
         value: "false"
-      - key: WORKER_CONCURRENCY
-        value: "5"
       - key: ALLOW_PRIVATE_DESTINATIONS
         value: "false"
+      - key: FORCE_HTTPS
+        value: "true"
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: WORKER_CONCURRENCY
+        value: "3"
+      - key: DEFAULT_MAX_RETRIES
+        value: "5"
+      - key: BACKOFF_BASE_SECONDS
+        value: "30"
+      - key: HTTP_CLIENT_TIMEOUT_SECONDS
+        value: "10"
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "60"
+      - key: MONTHLY_EVENT_QUOTA
+        value: "0"
+      - key: ENABLE_SIMULATOR
+        value: "false"
+      - key: ENABLE_AI_FEATURES
+        value: "false"
+      - key: JWT_SECRET
+        generateValue: true
+      # Set these in the Render dashboard after connecting your Neon DB
+      - key: DATABASE_URL
+        sync: false
+      - key: SYNC_DATABASE_URL
+        sync: false
+      - key: INTERNAL_API_URL
+        fromService:
+          type: web
+          name: relora-api
+          property: url
 
-databases:
-  - name: relora-db
+  - type: worker
+    name: relora-worker
+    runtime: docker
+    dockerfilePath: backend/Dockerfile
+    dockerContext: .
     plan: free
+    startCommand: python -m app.worker_main
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: ALLOW_PRIVATE_DESTINATIONS
+        value: "false"
+      - key: WORKER_CONCURRENCY
+        value: "2"
+      - key: WORKER_POLL_INTERVAL_SECONDS
+        value: "1"
+      - key: DEFAULT_MAX_RETRIES
+        value: "5"
+      - key: BACKOFF_BASE_SECONDS
+        value: "30"
+      - key: HTTP_CLIENT_TIMEOUT_SECONDS
+        value: "10"
+      - key: ENABLE_AI_FEATURES
+        value: "false"
+      # Set this in the Render dashboard after connecting your Neon DB
+      - key: DATABASE_URL
+        sync: false
