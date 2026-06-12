@@ -23,6 +23,7 @@ Most teams write a Celery task or an SQS consumer and call it a webhook handler.
 | Cloud source adapters | never | ✅ SNS, Pub/Sub, Azure Event Grid |
 | Audit log | never | ✅ tamper-evident, queryable |
 | Dashboard | never | ✅ built-in |
+| Weekly reliability insights | never | ✅ graded report + AI Q&A |
 | Multi-tenant | never | ✅ JWT + API key |
 
 ## Why Relora over Hookdeck / Svix (hosted services)
@@ -45,7 +46,8 @@ cp .env.example .env        # review defaults, set JWT_SECRET for production
 docker-compose up --build
 ```
 
-Dashboard: [http://localhost:8080](http://localhost:8080)  
+Marketing site: [http://localhost:8080](http://localhost:8080)  
+Dashboard: [http://localhost:8080/app.html](http://localhost:8080/app.html)  
 API docs: [http://localhost:8000/api/docs](http://localhost:8000/api/docs)
 
 **Register and send your first webhook:**
@@ -164,6 +166,21 @@ All state lives in **PostgreSQL**. No Redis. No Kafka. No external queue service
 - 0-100 health score based on DLQ size, growth rate, failure diversity, circuit state
 - AI-powered root cause analysis via Claude (`ENABLE_AI_FEATURES=true`)
 
+### Weekly Insights
+- Executive-style reliability briefing generated weekly per tenant
+- Letter grade (A+ → F) based on delivery success rate
+- AI-written narrative summary with trend analysis
+- Interactive Q&A — ask questions about your reliability data in plain English
+- Full archive of past weekly reports
+
+### Dashboard
+- **Events** — full webhook history with delivery status, payload inspection, and event pipeline view
+- **Destinations** — manage endpoints with a type-picker wizard (My API / Localhost / Test Endpoint / Other)
+- **Failed Events** — unified view with tabs for Failures, Incidents, DLQ, Replays, and Alert Settings
+- **Analytics** — Weekly Report, Trends, and Archive tabs
+- **Audit Log** — tamper-evident record of all configuration changes
+- Demo-first onboarding — a sandbox destination is auto-created on signup so you can see a working delivery before configuring anything
+
 ### Observability
 - Prometheus metrics at `/metrics` — webhook counts, delivery latency, circuit breaker states, DLQ depth
 - OpenTelemetry tracing — opt-in with `OTEL_EXPORTER_OTLP_ENDPOINT`
@@ -242,6 +259,59 @@ docker-compose run --rm relora-migrate   # runs alembic upgrade head
 ```
 
 Never use `AUTO_CREATE_TABLES=true` in production.
+
+### Free hosting (Fly.io + Supabase)
+
+Fly.io has a free tier (3 shared VMs). Supabase offers free managed Postgres. Together they run Relora at zero cost.
+
+The API serves the frontend directly (FastAPI StaticFiles), so no separate nginx app is needed on Fly.io.
+
+**1. Create a Supabase project** at [supabase.com](https://supabase.com) and copy the connection strings (both pooler and direct).
+
+**2. Install the Fly CLI** and log in:
+
+```bash
+curl -L https://fly.io/install.sh | sh
+fly auth login
+```
+
+**3. Create both apps:**
+
+```bash
+fly apps create relora-api
+fly apps create relora-worker
+```
+
+**4. Set secrets on each app:**
+
+```bash
+# API
+fly secrets set --app relora-api \
+  JWT_SECRET="$(openssl rand -hex 32)" \
+  DATABASE_URL="postgresql+asyncpg://postgres:[password]@[host]:5432/postgres" \
+  SYNC_DATABASE_URL="postgresql://postgres:[password]@[host]:5432/postgres"
+
+# Worker (same DATABASE_URL, no JWT_SECRET needed)
+fly secrets set --app relora-worker \
+  DATABASE_URL="postgresql+asyncpg://postgres:[password]@[host]:5432/postgres"
+```
+
+**5. Run migrations once:**
+
+```bash
+fly ssh console --app relora-api -C "cd /app/backend && alembic upgrade head"
+```
+
+**6. Deploy:**
+
+```bash
+fly deploy --config fly.api.toml
+fly deploy --config fly.worker.toml
+```
+
+Your app will be live at `https://relora-api.fly.dev`.
+
+Note: Vercel and other serverless platforms are **not compatible** — Relora's background worker requires a persistent process.
 
 ---
 
@@ -326,7 +396,7 @@ Results are saved to `benchmark/last_result.json`.
 ```bash
 cd backend
 pip install -r requirements.txt
-python -m pytest                          # 83 unit tests
+python -m pytest                          # unit tests
 python -m pytest tests/test_api_integration.py  # integration (needs running stack)
 ```
 

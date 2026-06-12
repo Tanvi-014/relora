@@ -1,0 +1,27 @@
+app = "relora-worker"
+primary_region = "iad"
+
+[build]
+  dockerfile = "backend/Dockerfile"
+
+[processes]
+  app = "python -m app.worker_main"
+
+[env]
+  ENVIRONMENT = "production"
+  ALLOW_PRIVATE_DESTINATIONS = "false"
+  WORKER_CONCURRENCY = "10"
+  WORKER_POLL_INTERVAL_SECONDS = "1"
+  DEFAULT_MAX_RETRIES = "5"
+  BACKOFF_BASE_SECONDS = "30"
+  HTTP_CLIENT_TIMEOUT_SECONDS = "10"
+  ENABLE_AI_FEATURES = "false"
+
+# Secrets — set via: fly secrets set DATABASE_URL=...
+# Required: DATABASE_URL
+# Optional: ANTHROPIC_API_KEY (set ENABLE_AI_FEATURES=true to use)
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1
